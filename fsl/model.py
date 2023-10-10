@@ -12,8 +12,10 @@ import torch.nn.functional as F
 from torchvision.ops import RoIAlign
 
 from segment_anything import sam_model_registry
-from segment_anything import SamPredictor as _SamPredictor
+from segment_anything import SamAutomaticMaskGenerator as _SAMG, SamPredictor as _SamPredictor
 from igniter.registry import model_registry
+
+from fsl.dataset import S3CocoDatasetSam
 
 
 _Tensor = Type[torch.Tensor]
@@ -22,13 +24,9 @@ _Image = Type[Image.Image]
 
 
 class Conv2dBN(nn.Sequential):
-    def __init__(
-        self, in_channels: int, hidden_channels: int, stride: int = 1, activation: Callable = None
-    ) -> None:
+    def __init__(self, in_channels: int, hidden_channels: int, stride: int = 1, activation: Callable = None) -> None:
         super(Conv2dBN, self).__init__()
-        self.conv = nn.Conv2d(
-            in_channels, hidden_channels, kernel_size=(3, 3), stride=stride, padding=1, bias=False
-        )
+        self.conv = nn.Conv2d(in_channels, hidden_channels, kernel_size=(3, 3), stride=stride, padding=1, bias=False)
         self.bn = nn.BatchNorm2d(hidden_channels)
         self.activation = activation
 
@@ -43,9 +41,10 @@ class AttentionPool2d(nn.Module):
     Performs attention pooling on the feature maps
     Ref: https://github.com/openai/CLIP/blob/main/clip/model.py#L58
     """
+
     def __init__(self, spatial_dim: int, embed_dim: int, num_heads: int, output_dim: int = None):
         super(AttentionPool2d, self).__init__()
-        self.positional_embedding = nn.Parameter(torch.randn(spatial_dim ** 2 + 1, embed_dim) / embed_dim ** 0.5)
+        self.positional_embedding = nn.Parameter(torch.randn(spatial_dim**2 + 1, embed_dim) / embed_dim**0.5)
         self.k_proj = nn.Linear(embed_dim, embed_dim)
         self.q_proj = nn.Linear(embed_dim, embed_dim)
         self.v_proj = nn.Linear(embed_dim, embed_dim)
@@ -57,7 +56,9 @@ class AttentionPool2d(nn.Module):
         x = torch.cat([x.mean(dim=0, keepdim=True), x], dim=0)  # (HW+1)NC
         x = x + self.positional_embedding[:, None, :].to(x.dtype)  # (HW+1)NC
         x, _ = F.multi_head_attention_forward(
-            query=x[:1], key=x, value=x,
+            query=x[:1],
+            key=x,
+            value=x,
             embed_dim_to_check=x.shape[-1],
             num_heads=self.num_heads,
             q_proj_weight=self.q_proj.weight,
@@ -73,7 +74,7 @@ class AttentionPool2d(nn.Module):
             out_proj_bias=self.c_proj.bias,
             use_separate_proj_weight=True,
             training=self.training,
-            need_weights=False
+            need_weights=False,
         )
         return x.squeeze(0)
 
@@ -98,10 +99,7 @@ class Relational(nn.Module):
 
 
 class SamPredictor(_SamPredictor):
-    def __init__(self, name: str, checkpoint: str):
-        assert osp.isfile(checkpoint), f'Weight file not found {checkpoint}!'
-        sam = sam_model_registry[name](checkpoint=checkpoint)
-
+    def __init__(self, sam):
         for parameter in sam.parameters():
             parameter.requires_grad = False
 
@@ -117,7 +115,9 @@ class SamPredictor(_SamPredictor):
         if image_format != self.model.image_format:
             images = [image[..., ::-1] for image in images]
 
-        input_images = [torch.as_tensor(self.transform.apply_image(image).transpose(2, 0, 1)) for image in images]
+        input_images = [
+            torch.as_tensor(self.transform.apply_image(image)).permute(2, 0, 1).contiguous() for image in images
+        ]
         input_images = [self.model.preprocess(image.to(self.device)) for image in input_images]
         input_images_torch = torch.stack(input_images).to(self.device)
         return self.model.image_encoder(input_images_torch)
@@ -163,56 +163,71 @@ class SamPredictor(_SamPredictor):
     def downsize(self) -> int:
         return self.model.image_encoder.img_size // self.model.image_encoder.patch_embed.proj.kernel_size[0]
 
+    def reset_image(self) -> None:
+        self.is_image_set = False
+        # self.features = None
+        self.orig_h = None
+        self.orig_w = None
+        self.input_h = None
+        self.input_w = None
+
+
+class SamAutomaticMaskGenerator(_SAMG):
+    def __init__(self, model, **kwargs):
+        super(SamAutomaticMaskGenerator, self).__init__(model, **kwargs)
+        self.predictor = SamPredictor(model)
+
 
 class SamRelationNetwork(nn.Module):
     def __init__(
-        self, sam_predictor: SamPredictor, relational_in_size: int = 128, roi_pool_size: int = 16
+        self, mask_generator: SamAutomaticMaskGenerator, relational_in_size: int = 128, roi_pool_size: int = 16
     ) -> None:
         super(SamRelationNetwork, self).__init__()
-        self.sam_predictor = sam_predictor
+        self.mask_generator = mask_generator
+
         self.condenser = nn.Conv2d(
-            sam_predictor.out_channels * 2,  relational_in_size, kernel_size=(3, 3), stride=1, padding=1
+            self.sam_predictor.out_channels * 2, relational_in_size, kernel_size=(3, 3), stride=1, padding=1
         )
         self.relation_net = Relational(relational_in_size, hidden_channels=relational_in_size // 2)
         self.roi_pool = RoIAlign(
-            roi_pool_size, spatial_scale=1 / sam_predictor.downsize, sampling_ratio=0, aligned=True
+            roi_pool_size, spatial_scale=1 / self.sam_predictor.downsize, sampling_ratio=0, aligned=True
         )
 
     def forward(self, images: List[Union[np.ndarray, _Image]], targets: Dict[str, Any] = None):
         if not self.training:
-            raise NotImplementedError('Inference is not yet implemented!')
+            return self.forward_inference(images)
 
         assert self.training and targets is not None
 
-        query_index = 0        
+        query_index = 0
         labels = torch.Tensor([i for target in targets for i in target['category_ids']])
         # y_true = torch.Tensor([1]) if labels.shape[0] == 1 else labels.eq(labels[query_index]).float()[1:]
 
         sam_feats = self.forward_sam(images)
         bboxes = self.get_roi_bboxes(targets if self.training else sam_feats[1])
-        roi_feats = self.roi_pool(sam_feats, bboxes)        
-        
+        roi_feats = self.roi_pool(sam_feats, bboxes)
+
         if labels.shape[0] == 1:
             y_true = torch.Tensor([1])
-            query_feats = roi_feats.clone()            
+            query_feats = roi_feats.clone()
         else:
             mode, index = torch.mode(labels)
             query_index = int(index)
             y_true = labels.eq(mode).float()
-            y_true = torch.cat((y_true[:query_index], y_true[query_index + 1:]), dim=0)
+            y_true = torch.cat((y_true[:query_index], y_true[query_index + 1 :]), dim=0)
 
             k = roi_feats.shape[0]
             query_feats = roi_feats[query_index][None].repeat(k - 1, 1, 1, 1)
             roi_feats = self.remove(roi_feats, query_index)
 
         roi_feats = torch.cat([roi_feats, query_feats], dim=1)
-        roi_feats = self.condenser(roi_feats)        
+        roi_feats = self.condenser(roi_feats)
         y_pred = self.relation_net(roi_feats)
 
         if self.training:
-            assert y_true.shape[0] == roi_feats.shape[0], (
-                f'Shape mismatch of label {y_true.shape} and roi {roi_feats.shape}'
-            )
+            assert (
+                y_true.shape[0] == roi_feats.shape[0]
+            ), f'Shape mismatch of label {y_true.shape} and roi {roi_feats.shape}'
 
             y_true = y_true.reshape(-1, 1).to(self.device)
             return self.losses(y_pred, y_true)
@@ -220,11 +235,29 @@ class SamRelationNetwork(nn.Module):
         return roi_feats
 
     @torch.no_grad()
-    def forward_sam(self, images: List[np.ndarray]) -> Union[_Tensor, Tuple[_Tensor, List[_Tensor]]]:
+    def forward_inference(self, images: List[Union[np.ndarray, _Image]]) -> Any:
+        masks = self.forward_sam(images)
+        bboxes = [torch.FloatTensor(S3CocoDatasetSam.xywh_to_xyxy(mask['bbox'])) for mask in masks]
+        bboxes = [torch.stack(bboxes).to(self.sam_predictor.features.device)]
+        roi_feats = self.roi_pool(self.sam_predictor.features, bboxes)
+
+        # import IPython, sys; IPython.embed(header="forward"); sys.exit()
+
+        raise NotImplementedError('Inference is not yet implemented!')
+
+    @torch.no_grad()
+    def forward_sam(self, images: List[np.ndarray]) -> Union[_Tensor, Tuple[_Tensor, List[Dict[str, Any]]]]:
         x = [np.asarray(image) for image in images]
-        if self.training:
+        if self.training or len(images) > 1:
             return self.sam_predictor.set_images(x)
-        raise NotImplementedError('Automatic Mask Generator implementation is needed')
+
+        self.mask_generator.predictor.set_image(x[0])
+        masks = self.mask_generator.generate(x[0])
+        return masks
+
+    def set_query_images(self, images: List[Union[np.ndarray, _Image]], bboxes: List[np.ndarray] = None):
+        features = self.forward_sam(images)
+        self.query_feats = self.roi_pool(features, bboxes)
 
     def get_roi_bboxes(self, targets: List[Dict[str, _Tensor]] = None):
         if targets is not None:
@@ -244,7 +277,11 @@ class SamRelationNetwork(nn.Module):
 
     @staticmethod
     def remove(tensor: _Tensor, index: int) -> _Tensor:
-        return torch.cat((tensor[:index], tensor[index + 1:]), dim=0)
+        return torch.cat((tensor[:index], tensor[index + 1 :]), dim=0)
+
+    @property
+    def sam_predictor(self) -> SamPredictor:
+        return self.mask_generator.predictor
 
     @property
     def device(self) -> torch.device:
@@ -252,13 +289,17 @@ class SamRelationNetwork(nn.Module):
 
 
 @model_registry('relational_network')
-def sam_relational_network(sam_args: Dict[str, str] = {'model': 'default', 'checkpoint': None}) -> SamRelationNetwork:
-    sam_predictor = SamPredictor(sam_args['model'], sam_args.get('checkpoint', None))
-    return SamRelationNetwork(sam_predictor)
+def sam_relational_network(
+    sam_args: Dict[str, str] = {'model': 'default', 'checkpoint': None}, mask_gen_args: Dict[str, Any] = {}
+) -> SamRelationNetwork:
+    sam = sam_model_registry[sam_args['model']](checkpoint=sam_args.get('checkpoint', None))
+    sam_predictor = SamPredictor(sam)
+    # sam_predictor = SamPredictor(sam_args['model'], sam_args.get('checkpoint', None))
+    mask_generator = SamAutomaticMaskGenerator(sam_predictor.model, **mask_gen_args)
+    return SamRelationNetwork(mask_generator)
 
 
 if __name__ == '__main__':
-
     m = sam_relational_network(
         {'model': 'default', 'checkpoint': '/root/.cache/torch/segment_anything/checkpoints/sam_vit_h_4b8939.pth'}
     )
@@ -269,5 +310,7 @@ if __name__ == '__main__':
 
     bb = [torch.Tensor(np.array([0, 0, 100, 200]))] * 2
     r = m([im], [{'bboxes': bb}])
-    
-    import IPython; IPython.embed()
+
+    import IPython
+
+    IPython.embed()

@@ -124,7 +124,7 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
 
 
 @func_registry('collate_data')
-def collate_data(batches: List[Dict[str, Any]]) -> List[Any]:    
+def collate_data(batches: List[Dict[str, Any]]) -> List[Any]:
     images, targets = [], []
     for batch in batches:
         images.append(batch['image'])

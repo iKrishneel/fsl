@@ -23,6 +23,11 @@ transforms:
     engine: "torchvision.transforms"
     ResizeLongestSide:
       size: 1024
+  test:
+    ResizeLongestSide:
+      size: 1024
+    # PadToSize:
+    #   size: 1024
 
 datasets:
   dataloader:
@@ -62,8 +67,12 @@ io:
 build:
   relational_network:
     dataset: "coco"
+    weights: "s3://sr-shokunin/perception/models/fsl/sam_relational/model_0000017.pt"
     train:
       solver: "SGD"
       epochs: 100
-
+    inference:
+      transforms: "test"
+      engine: "inference"
+  
   model: "relational_network"
