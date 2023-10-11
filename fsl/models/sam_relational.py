@@ -1,6 +1,7 @@
 #!/usr/bin/evn python
 
 from typing import Any, Dict, List, Type, Callable, Iterator, Union, Tuple
+from dataclasses import dataclass, field
 
 import os.path as osp
 import numpy as np
@@ -9,7 +10,13 @@ from PIL import Image
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+import torchvision
+torchvision.disable_beta_transforms_warning()
+
 from torchvision.ops import RoIAlign
+from torchvision.transforms.v2 import functional
+from torchvision.datapoints import BoundingBoxFormat
 
 from segment_anything import sam_model_registry
 from segment_anything import SamAutomaticMaskGenerator as _SAMG, SamPredictor as _SamPredictor
@@ -98,12 +105,14 @@ class Relational(nn.Module):
         return x
 
 
-class SamPredictor(_SamPredictor):
+class SamPredictor(nn.Module, _SamPredictor):
     def __init__(self, sam):
+        super(SamPredictor, self).__init__()
+
         for parameter in sam.parameters():
             parameter.requires_grad = False
 
-        super(SamPredictor, self).__init__(sam_model=sam)
+        _SamPredictor.__init__(self, sam_model=sam)
 
     @torch.no_grad()
     def forward(self, images: List[np.ndarray]) -> torch.Tensor:
@@ -123,6 +132,7 @@ class SamPredictor(_SamPredictor):
         self.model.image_encoder.to(self.device)
         return self.model.image_encoder(input_images_torch)
 
+    """
     def to(self, device):
         self.model.to(device)
 
@@ -151,6 +161,7 @@ class SamPredictor(_SamPredictor):
 
     def named_parameters(self, *args, **kwargs):
         return self.model.named_parameters(*args, **kwargs)
+    """
 
     @property
     def img_size(self) -> List[int]:
@@ -173,10 +184,42 @@ class SamPredictor(_SamPredictor):
         self.input_w = None
 
 
-class SamAutomaticMaskGenerator(_SAMG):
+class SamAutomaticMaskGenerator(nn.Module, _SAMG):
     def __init__(self, model, **kwargs):
-        super(SamAutomaticMaskGenerator, self).__init__(model, **kwargs)
+        super(SamAutomaticMaskGenerator, self).__init__()
+        _SAMG.__init__(self, model, **kwargs)
+        
         self.predictor = SamPredictor(model)
+
+    def forward(self, images: List[Union[np.ndarray, _Image]]) -> _Tensor:
+        x = [np.asarray(image) for image in images]
+        return self.predictor.set_images(x)
+
+    def get_proposals(self, image: Union[_Image, np.ndarray]) -> List[Dict[str, Any]]:
+        image = np.asarray(image)
+        masks = self.generate(image)
+        proposals = [
+            Proposal(*[mask[k] for k in ['bbox', 'segmentation']]).convert_bbox_fmt(BoundingBoxFormat.XYXY)
+            for mask in masks
+        ]
+        return proposals
+        
+
+
+@dataclass
+class Proposal(object):
+    bbox: List[int] = None
+    mask: np.ndarray = None
+    bbox_fmt: BoundingBoxFormat = BoundingBoxFormat.XYWH
+
+    def convert_bbox_fmt(self, bbox_fmt: BoundingBoxFormat) -> 'Proposal':
+        bbox = functional.convert_format_bounding_box(torch.as_tensor(self.bbox), self.bbox_fmt, bbox_fmt)
+        self.bbox = bbox.cpu().numpy()
+        self.bbox_fmt = bbox_fmt
+        return self
+
+    def __repr__(self) -> str:
+        return f'{self.bbox} | {self.bbox_fmt}'
 
 
 class SamRelationNetwork(nn.Module):
@@ -312,12 +355,44 @@ class SamRelationNetwork(nn.Module):
         return self.sam_predictor.model.image_encoder.patch_embed.proj.weight.device
 
 
+def get_sam_model(name: str = 'default'):
+    import os
+    import subprocess
+
+    url = 'https://dl.fbaipublicfiles.com/segment_anything/sam_vit_%s.pth'
+    sam_checkpoint_registry = {'default': 'h_4b8939', 'vit_h': 'h_4b8939', 'vit_l': 'l_0b3195', 'vit_b': 'b_01ec64'}
+
+    directory = os.path.join(os.environ['HOME'], '.cache/torch/segment_anything/checkpoints/')
+    checkpoint = os.path.join(directory, f'sam_vit_{sam_checkpoint_registry[name]}.pth')
+
+    if not os.path.isfile(checkpoint):
+        os.makedirs(directory, exist_ok=True)
+        try:
+            checkpoint_url = url % sam_checkpoint_registry[name]
+            command = ['wget', checkpoint_url, '-P', directory, '--quiet', '--show-progress', '--progress=dot']
+            subprocess.run(command, check=True)
+            print(f'Downloaded {checkpoint_url}')
+        except subprocess.CalledProcessError as e:
+            print(f'Error downloading {checkpoint_url}: {e}')
+            checkpoint = None
+
+    print(f'Loading checkpoint from {checkpoint}')
+    sam_model = sam_model_registry[name](checkpoint)
+    return sam_model
+
+
+def build_sam_predictor(model: str, checkpoint: str = None) -> SamPredictor:
+    return SamPredictor(get_sam_model(model) if checkpoint is None else sam_model_registry[model](checkpoint=checkpoint))
+
+
+def build_sam_auto_mask_generator(sam_args: Dict[str, str], mask_gen_args: Dict[str, Any]) -> SamAutomaticMaskGenerator:
+    sam_predictor = build_sam_predictor(**sam_args)    
+    return SamAutomaticMaskGenerator(sam_predictor.model, **mask_gen_args)
+
+
 @model_registry('relational_network')
 def sam_relational_network(
     sam_args: Dict[str, str] = {'model': 'default', 'checkpoint': None}, mask_gen_args: Dict[str, Any] = {}
 ) -> SamRelationNetwork:
-    sam = sam_model_registry[sam_args['model']](checkpoint=sam_args.get('checkpoint', None))
-    sam_predictor = SamPredictor(sam)
-    # sam_predictor = SamPredictor(sam_args['model'], sam_args.get('checkpoint', None))
-    mask_generator = SamAutomaticMaskGenerator(sam_predictor.model, **mask_gen_args)
+    mask_generator = build_sam_auto_mask_generator(sam_args, mask_gen_args)
     return SamRelationNetwork(mask_generator)
