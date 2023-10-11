@@ -26,8 +26,8 @@ transforms:
   test:
     ResizeLongestSide:
       size: 1024
-    # PadToSize:
-    #   size: 1024
+    PadToSize:
+      size: 1024
 
 datasets:
   dataloader:

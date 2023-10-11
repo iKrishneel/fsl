@@ -120,6 +120,7 @@ class SamPredictor(_SamPredictor):
         ]
         input_images = [self.model.preprocess(image.to(self.device)) for image in input_images]
         input_images_torch = torch.stack(input_images).to(self.device)
+        self.model.image_encoder.to(self.device)
         return self.model.image_encoder(input_images_torch)
 
     def to(self, device):
@@ -192,6 +193,7 @@ class SamRelationNetwork(nn.Module):
         self.roi_pool = RoIAlign(
             roi_pool_size, spatial_scale=1 / self.sam_predictor.downsize, sampling_ratio=0, aligned=True
         )
+        self._query_feats = None
 
     def forward(self, images: List[Union[np.ndarray, _Image]], targets: Dict[str, Any] = None):
         if not self.training:
@@ -224,15 +226,12 @@ class SamRelationNetwork(nn.Module):
         roi_feats = self.condenser(roi_feats)
         y_pred = self.relation_net(roi_feats)
 
-        if self.training:
-            assert (
-                y_true.shape[0] == roi_feats.shape[0]
-            ), f'Shape mismatch of label {y_true.shape} and roi {roi_feats.shape}'
+        assert (
+            y_true.shape[0] == roi_feats.shape[0]
+        ), f'Shape mismatch of label {y_true.shape} and roi {roi_feats.shape}'
 
-            y_true = y_true.reshape(-1, 1).to(self.device)
-            return self.losses(y_pred, y_true)
-
-        return roi_feats
+        y_true = y_true.reshape(-1, 1).to(self.device)
+        return self.losses(y_pred, y_true)
 
     @torch.no_grad()
     def forward_inference(self, images: List[Union[np.ndarray, _Image]]) -> Any:
@@ -241,23 +240,40 @@ class SamRelationNetwork(nn.Module):
         bboxes = [torch.stack(bboxes).to(self.sam_predictor.features.device)]
         roi_feats = self.roi_pool(self.sam_predictor.features, bboxes)
 
-        # import IPython, sys; IPython.embed(header="forward"); sys.exit()
+        query_feats = self.query_feats.repeat(roi_feats.shape[0], 1, 1, 1)
+        roi_feats = torch.cat([roi_feats, query_feats], dim=1)
+        roi_feats = self.condenser(roi_feats)
+        y_pred = self.relation_net(roi_feats)
+        
+        import IPython, sys; IPython.embed(header="forward"); sys.exit()
 
         raise NotImplementedError('Inference is not yet implemented!')
 
     @torch.no_grad()
-    def forward_sam(self, images: List[np.ndarray]) -> Union[_Tensor, Tuple[_Tensor, List[Dict[str, Any]]]]:
+    def forward_sam(
+        self, images: List[np.ndarray], only_feats: bool = False
+    ) -> Union[_Tensor, Tuple[_Tensor, List[Dict[str, Any]]]]:
         x = [np.asarray(image) for image in images]
-        if self.training or len(images) > 1:
+        if self.training or only_feats:
             return self.sam_predictor.set_images(x)
 
         self.mask_generator.predictor.set_image(x[0])
         masks = self.mask_generator.generate(x[0])
         return masks
 
-    def set_query_images(self, images: List[Union[np.ndarray, _Image]], bboxes: List[np.ndarray] = None):
+    def set_query_images(self, images: List[Union[np.ndarray, _Image]], bboxes: List[np.ndarray]):
         features = self.forward_sam(images)
-        self.query_feats = self.roi_pool(features, bboxes)
+        self._query_feats = self.roi_pool(features, bboxes)
+
+    def set_query_roi_features(self, features: _Tensor) -> None:
+        expected_size = torch.Size([self.roi_pool.output_size] * 2)
+        assert features.shape[2:] == expected_size, f'Expected spatial size {expected_size} but got features.shape[2:]'
+        self._query_feats = features.to(self.device)
+
+    def get_query_roi_features(self, images: List[Union[np.ndarray, _Image]], bboxes: List[np.ndarray]):
+        features = self.forward_sam(images, only_feats=True)
+        bboxes = [bbox.to(self.device) for bbox in bboxes]
+        return self.roi_pool(features, bboxes)
 
     def get_roi_bboxes(self, targets: List[Dict[str, _Tensor]] = None):
         if targets is not None:
@@ -275,9 +291,17 @@ class SamRelationNetwork(nn.Module):
         self.sam_predictor.model.cuda(device)
         return super(SamRelationNetwork, self).cuda(device)
 
+    def eval(self):
+        self.sam_predictor.model.eval()
+        return super(SamRelationNetwork, self).eval()
+
     @staticmethod
     def remove(tensor: _Tensor, index: int) -> _Tensor:
         return torch.cat((tensor[:index], tensor[index + 1 :]), dim=0)
+
+    @property
+    def query_feats(self) -> _Tensor:
+        return self._query_feats
 
     @property
     def sam_predictor(self) -> SamPredictor:
