@@ -61,7 +61,7 @@ class InferenceEngine(_InferenceEngine):
 if __name__ == '__main__':
     from fsl.model import *
     from fsl.transforms import *
-    from fsl.dataset import *
+    from fsl.datasets.s3_coco_dataset import *
     from igniter.builder import build_engine
 
     from PIL import Image

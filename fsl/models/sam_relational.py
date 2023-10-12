@@ -1,7 +1,6 @@
 #!/usr/bin/evn python
 
 from typing import Any, Dict, List, Type, Callable, Iterator, Union, Tuple
-from dataclasses import dataclass, field
 
 import os.path as osp
 import numpy as np
@@ -11,19 +10,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import torchvision
-torchvision.disable_beta_transforms_warning()
-
 from torchvision.ops import RoIAlign
-from torchvision.transforms.v2 import functional
-from torchvision.datapoints import BoundingBoxFormat
 
 from segment_anything import sam_model_registry
 from segment_anything import SamAutomaticMaskGenerator as _SAMG, SamPredictor as _SamPredictor
 from igniter.registry import model_registry
 
 from fsl.dataset import S3CocoDatasetSam
-
+from fsl.structures import Proposal
 
 _Tensor = Type[torch.Tensor]
 _Module = Type[nn.Module]
@@ -204,23 +198,6 @@ class SamAutomaticMaskGenerator(nn.Module, _SAMG):
         ]
         return proposals
         
-
-
-@dataclass
-class Proposal(object):
-    bbox: List[int] = None
-    mask: np.ndarray = None
-    bbox_fmt: BoundingBoxFormat = BoundingBoxFormat.XYWH
-
-    def convert_bbox_fmt(self, bbox_fmt: BoundingBoxFormat) -> 'Proposal':
-        bbox = functional.convert_format_bounding_box(torch.as_tensor(self.bbox), self.bbox_fmt, bbox_fmt)
-        self.bbox = bbox.cpu().numpy()
-        self.bbox_fmt = bbox_fmt
-        return self
-
-    def __repr__(self) -> str:
-        return f'{self.bbox} | {self.bbox_fmt}'
-
 
 class SamRelationNetwork(nn.Module):
     def __init__(
