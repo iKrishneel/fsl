@@ -1,23 +1,28 @@
 #!/usr/bin/env python
 
-from typing import List, Union
+from typing import Any, Dict, List, Union
 from dataclasses import dataclass
 
 import numpy as np
 import torch
 
 import torchvision
+
 torchvision.disable_beta_transforms_warning()
 
 from torchvision.transforms.v2 import functional
 from torchvision.datapoints import BoundingBoxFormat
 
+Coord = Union[List[int], np.ndarray, torch.Tensor]
+Array = Union[np.ndarray, torch.Tensor]
+
 
 @dataclass
 class Proposal(object):
-    bbox: Union[List[int], np.ndarray, torch.Tensor] = None
-    mask: Union[np.ndarray, torch.Tensor] = None
+    bbox: Coord = None
+    mask: Array = None
     label: str = ""
+    class_id: int = -1
     bbox_fmt: BoundingBoxFormat = BoundingBoxFormat.XYWH
 
     def convert_bbox_fmt(self, bbox_fmt: BoundingBoxFormat) -> 'Proposal':
@@ -37,3 +42,15 @@ class Proposal(object):
 
     def __repr__(self) -> str:
         return f'{self.label} | {self.bbox} | {self.bbox_fmt}'
+
+
+@dataclass
+class Proposals(object):
+    bboxes: List[Coord] = None
+    masks: List[Array] = None
+    class_ids: List[int] = None
+    bbox_fmt: BoundingBoxFormat = BoundingBoxFormat.XYWH
+
+    def __call__(self, annotations: Dict[str, Any]) -> 'Proposals':
+        for key in ['bboxes', 'masks', 'category_id', 'class_id']:
+            setattr(self, key, annotations.get(key, None))

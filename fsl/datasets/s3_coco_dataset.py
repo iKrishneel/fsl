@@ -11,6 +11,8 @@ from igniter.datasets import S3CocoDataset
 from igniter.logger import logger
 from igniter.registry import dataset_registry, func_registry
 
+from fsl.structures import Proposal
+
 
 class S3CocoDatasetSam(S3CocoDataset):
     def __init__(self, *args, **kwargs):

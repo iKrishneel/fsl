@@ -16,7 +16,7 @@ from segment_anything import sam_model_registry
 from segment_anything import SamAutomaticMaskGenerator as _SAMG, SamPredictor as _SamPredictor
 from igniter.registry import model_registry
 
-from fsl.dataset import S3CocoDatasetSam
+from fsl.datasets.s3_coco_dataset import S3CocoDatasetSam
 from fsl.structures import Proposal
 
 _Tensor = Type[torch.Tensor]
@@ -182,7 +182,7 @@ class SamAutomaticMaskGenerator(nn.Module, _SAMG):
     def __init__(self, model, **kwargs):
         super(SamAutomaticMaskGenerator, self).__init__()
         _SAMG.__init__(self, model, **kwargs)
-        
+
         self.predictor = SamPredictor(model)
 
     def forward(self, images: List[Union[np.ndarray, _Image]]) -> _Tensor:
@@ -197,7 +197,7 @@ class SamAutomaticMaskGenerator(nn.Module, _SAMG):
             for mask in masks
         ]
         return proposals
-        
+
 
 class SamRelationNetwork(nn.Module):
     def __init__(
@@ -264,8 +264,11 @@ class SamRelationNetwork(nn.Module):
         roi_feats = torch.cat([roi_feats, query_feats], dim=1)
         roi_feats = self.condenser(roi_feats)
         y_pred = self.relation_net(roi_feats)
-        
-        import IPython, sys; IPython.embed(header="forward"); sys.exit()
+
+        import IPython, sys
+
+        IPython.embed(header="forward")
+        sys.exit()
 
         raise NotImplementedError('Inference is not yet implemented!')
 
@@ -359,11 +362,13 @@ def get_sam_model(name: str = 'default'):
 
 
 def build_sam_predictor(model: str, checkpoint: str = None) -> SamPredictor:
-    return SamPredictor(get_sam_model(model) if checkpoint is None else sam_model_registry[model](checkpoint=checkpoint))
+    return SamPredictor(
+        get_sam_model(model) if checkpoint is None else sam_model_registry[model](checkpoint=checkpoint)
+    )
 
 
 def build_sam_auto_mask_generator(sam_args: Dict[str, str], mask_gen_args: Dict[str, Any]) -> SamAutomaticMaskGenerator:
-    sam_predictor = build_sam_predictor(**sam_args)    
+    sam_predictor = build_sam_predictor(**sam_args)
     return SamAutomaticMaskGenerator(sam_predictor.model, **mask_gen_args)
 
 

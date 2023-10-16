@@ -14,6 +14,7 @@ from igniter.engine import InferenceEngine as _InferenceEngine
 
 _Image = Type[Image.Image]
 
+
 @engine_registry('inference')
 class InferenceEngine(_InferenceEngine):
     def __init__(self, *args, **kwargs):
@@ -42,7 +43,7 @@ class InferenceEngine(_InferenceEngine):
         for anno in annos:
             image = Image.open(osp.join(root, anno['file_name']))
             bboxs = torch.stack([torch.FloatTensor(bb) for bb in anno['bboxes']])
-            
+
             image, bboxs = self.apply_transforms(image, bboxs)
             images.append(image)
             bboxes.append(torch.stack(bboxs))
@@ -69,6 +70,7 @@ if __name__ == '__main__':
 
     import logging
     from igniter.logger import logger
+
     logger.setLevel(logging.INFO)
 
     cfg = OmegaConf.load('./configs/sam_relational_net.yaml')
