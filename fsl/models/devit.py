@@ -15,6 +15,8 @@ from igniter.registry import model_registry
 
 from fsl.structures import Proposal
 from fsl.datasets import utils
+from fsl.utils.prototypes import ProtoTypes
+
 
 _Image = Type[Image.Image]
 _Tensor = Type[torch.Tensor]
@@ -90,12 +92,24 @@ class PropagateNet(nn.Module):
 
 
 class DeVit(nn.Module):
-    def __init__(self, mask_generator, proposal_matcher, roi_pool_size: int = 16):
+    def __init__(
+        self,
+        mask_generator,
+        proposal_matcher,
+        prototypes: ProtoTypes,            
+        all_cids = [],
+        seen_cids = [],             
+        roi_pool_size: int = 16
+    ):
         super(DeVit, self).__init__()
         self.mask_generator = mask_generator
         self.proposal_matcher = proposal_matcher
         self.roi_pool = RoIAlign(roi_pool_size, spatial_scale=1 / mask_generator.predictor.downsize, sampling_ratio=-1)
 
+        self.setup_prototypes(prototypes, all_cids, seen_cids)
+
+        # import IPython, sys; IPython.embed(); sys.exit()
+        
         # TODO: Configure this
         self.class_weights = None
         self.batch_size_per_image = 128
@@ -123,6 +137,15 @@ class DeVit(nn.Module):
         self.per_cls_cnn = PropagateNet(cls_input_dim, hidden_dim, num_layers=num_cls_layers)
         self.bg_cnn = PropagateNet(bg_input_dim, hidden_dim, num_layers=num_cls_layers)
 
+    def setup_prototypes(self, prototypes: ProtoTypes, all_cids: List[str], seen_cids: List[str] = None):
+        pt = prototypes.check(all_cids)
+        train_class_order = [pt.labels.index(c) for c in seen_cids]
+        test_class_order = [pt.labels.index(c) for c in all_cids]
+        assert -1 not in train_class_order and -1 not in test_class_order
+
+        self.register_buffer('train_class_weight', pt.normalized_embedding[torch.as_tensor(train_class_order)])
+        self.register_buffer('test_class_weight', pt.normalized_embedding[torch.as_tensor(test_class_order)])
+        
     def forward(self, images: List[_Image], targets: Dict[str, Any] = None):
         if not self.training:
             return self.forward_once(images)
@@ -130,11 +153,6 @@ class DeVit(nn.Module):
         num_classes = len(self.class_weights)
         device = self.mask_generator.predictor.device  # TODO
         assert targets is not None and isinstance(targets, dict)
-
-        import IPython, sys
-
-        IPython.embed()
-        sys.exit()
 
         # proposals
         gt_proposals = [target['gt_proposal'] for target in targets]
@@ -344,7 +362,7 @@ class DeVit(nn.Module):
     @torch.no_grad()
     def forward_once(self, images: List[_Image]) -> Dict[str, Any]:
         proposals = self.get_proposals(images)
-        return {'features': self.mask_generator.predictor.features, 'proposals': proposals}
+        return {'features': self.mask_generator.predictor.features, 'proposals': proposals}        
 
     def get_proposals(self, images: List[_Image]) -> List[List[Proposal]]:
         return [self.mask_generator.get_proposals(image) for image in images]
@@ -387,20 +405,47 @@ class DeVit(nn.Module):
         return loss
 
 
+def read_text_file(filename: str) -> List[str]:
+    with open(filename, 'r') as txt_file:
+        lines = txt_file.readlines()
+    return [line.strip('\n') for line in lines]
+
+
 @model_registry
-def devit(sam_args: Dict[str, str], mask_gen_args: Dict[str, Any] = {}):
+def devit(
+    sam_args: Dict[str, str],
+    mask_gen_args: Dict[str, Any] = {},
+    prototype_file: str = None,
+    all_classes_fn: str = None,
+    seen_classes_fn: str = None,
+):
     from fsl.models.sam_relational import build_sam_auto_mask_generator
     from fsl.utils.matcher import Matcher
 
     mask_generator = build_sam_auto_mask_generator(sam_args, mask_gen_args)
     proposal_matcher = Matcher([0.3, 0.7], [0, -1, 1])
 
-    return DeVit(mask_generator, proposal_matcher=proposal_matcher)
+    prototypes = ProtoTypes.load(prototype_file)
+    all_cids = read_text_file(all_classes_fn)
+    seen_cids = read_text_file(seen_classes_fn)
+
+    return DeVit(
+        mask_generator, proposal_matcher=proposal_matcher, prototypes=prototypes, all_cids=all_cids, seen_cids=seen_cids
+    )
 
 
 if __name__ == '__main__':
-    m = devit({'model': 'vit_b', 'checkpoint': None})
+    fn = '/root/krishneel/Downloads/fs_coco_trainval_novel_10shot.vitl14.pkl'
+    an = '../../data/coco/all_classes.txt'
+    sn = '../../data/coco/seen_classes.txt'
+    
+    m = devit(
+        {'model': 'vit_b', 'checkpoint': None},
+        prototype_file=fn,
+        all_classes_fn=an,
+        seen_classes_fn=sn
+    )
     m.cuda()
 
-    im = Image.open('/root/krishneel/Downloads/000001.jpg')
-    m([im], targets={'bboxes': [1, 2, 3, 4]})
+    # im = Image.open('/root/krishneel/Downloads/000001.jpg')
+    # m([im], targets={'bboxes': [1, 2, 3, 4]})
