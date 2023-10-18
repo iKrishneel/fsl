@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from typing import List
+from typing import List, Union
 
 import numpy as np
 import torch
@@ -12,13 +12,14 @@ from fsl.structures import Proposal
 
 
 def prepare_noisy_boxes(
-    gt_boxes: List[Proposal], im_shape: List[int], box_noise_scale: float = 1.0, n: int = 5
-) -> List[Proposal]:
+    gt_boxes: Union[List[Proposal], Proposal], im_shape: List[int], box_noise_scale: float = 1.0, n: int = 5
+) -> Union[List[Proposal], Proposal]:
+    gt_boxes = [gt_boxes] if not isinstance(gt_boxes, list) else gt_boxes
     noisy_boxes = []
     h, w = np.array(im_shape, dtype=np.float32)
-    for box in gt_boxes:
-        box = box.repeat(n, 1)
-        box_ccwh = torch.as_tensor(box.convert_bbox_fmt(BoundingBoxFormat.CXCYWH).bbox)
+    for proposal in gt_boxes:
+        proposals = proposal.to_tensor().repeat(n)
+        box_ccwh = torch.stack([p.convert_bbox_fmt(BoundingBoxFormat.CXCYWH).bbox for p in proposals])
 
         diff = torch.zeros_like(box_ccwh)
         diff[:, :2] = box_ccwh[:, 2:] / 2
@@ -35,6 +36,7 @@ def prepare_noisy_boxes(
         noisy_box[:, 1].clamp_(min=0.0, max=im_shape[0])
         noisy_box[:, 3].clamp_(min=0.0, max=im_shape[0])
 
-        noisy_boxes.append(Proposal(bbox=noisy_box, bbox_fmt=BoundingBoxFormat.XYXY))
+        for b in noisy_box:
+            noisy_boxes.append(Proposal(bbox=b, bbox_fmt=BoundingBoxFormat.XYXY))
 
     return noisy_boxes

@@ -3,6 +3,7 @@
 from typing import Any, Dict, List, Union
 from dataclasses import dataclass
 
+from copy import deepcopy
 import numpy as np
 import torch
 
@@ -40,8 +41,12 @@ class Proposal(object):
             self.mask = torch.as_tensor(self.mask)
         return self
 
+    def repeat(self, n: int) -> List['Proposal']:
+        assert n > 0
+        return [deepcopy(self) for i in range(n)]
+
     def __repr__(self) -> str:
-        return f'{self.label} | {self.bbox} | {self.bbox_fmt}'
+        return f'{self.bbox}'
 
 
 @dataclass
