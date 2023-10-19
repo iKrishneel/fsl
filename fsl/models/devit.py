@@ -98,9 +98,9 @@ class DeVit(nn.Module):
         proposal_matcher,
         prototypes: ProtoTypes,
         background_prototypes: ProtoTypes = None,
-        all_cids = [],
-        seen_cids = [],             
-        roi_pool_size: int = 16
+        all_cids=[],
+        seen_cids=[],
+        roi_pool_size: int = 16,
     ):
         super(DeVit, self).__init__()
         self.mask_generator = mask_generator
@@ -111,7 +111,7 @@ class DeVit(nn.Module):
 
         if background_prototypes is not None:
             self.register_buffer('bg_tokens', background_prototypes.embeddings)
-        
+
         # TODO: Configure this
         self.batch_size_per_image = 128
         self.pos_ratio = 0.25
@@ -121,7 +121,7 @@ class DeVit(nn.Module):
         self.t_pos_emb = 128
         self.t_bg_emb = 128
         self.cls_temp = 0.1
-        self.bg_cls_weight = 0.2        
+        self.bg_cls_weight = 0.2
         hidden_dim = 256
 
         self.fc_other_class = nn.Linear(self.t_len, self.temb)
@@ -143,7 +143,7 @@ class DeVit(nn.Module):
 
         self.register_buffer('train_class_weight', pt.normalized_embedding[torch.as_tensor(train_class_order)])
         self.register_buffer('test_class_weight', pt.normalized_embedding[torch.as_tensor(test_class_order)])
-        
+
     def forward(self, images: List[_Image], targets: Dict[str, Any] = None):
         if not self.training:
             return self.forward_once(images)
@@ -156,16 +156,16 @@ class DeVit(nn.Module):
         gt_instances = [target['gt_proposal'] for target in targets]
         gt_bboxes = [gt_proposal.to_tensor().bboxes for gt_proposal in gt_instances]
         noisy_proposals = utils.prepare_noisy_boxes(gt_bboxes, im.size[::-1])
-        boxes = [torch.cat([gt_bboxes[i], noisy_proposals[i]]) for i in range(len(targets))]
-        
+        boxes = [torch.cat([gt_bboxes[i], noisy_proposals[i]]).to(device) for i in range(len(targets))]
+
         # embedding of the images
         features = self.mask_generator(images)
 
         class_labels, matched_gt_boxes, resampled_proposals = [], [], []
         num_bg_samples, num_fg_samples, gt_masks = [], [], []
         for i, (proposals_per_image, targets_per_image) in enumerate(zip(boxes, gt_instances)):
-            targets_per_image = targets_per_image.to_tensor()
-            
+            targets_per_image = targets_per_image.to_tensor(device)
+
             match_quality_matrix = box_iou(targets_per_image.bboxes, proposals_per_image)
             matched_idxs, matched_labels = self.proposal_matcher(match_quality_matrix)
 
@@ -174,7 +174,7 @@ class DeVit(nn.Module):
                 # no annotation on this image
                 assert torch.all(matched_labels == 0)
                 class_labels_i = torch.zeros_like(matched_idxs)
-                
+
             class_labels_i[matched_labels == 0] = num_classes
             class_labels_i[matched_labels == -1] = -1
 
@@ -188,7 +188,7 @@ class DeVit(nn.Module):
             num_neg = batch_size_per_image - num_pos
             # protect against not enough negative examples
             num_neg = min(negative.numel(), num_neg)
-            
+
             perm1 = torch.randperm(positive.numel())[:num_pos]
             perm2 = torch.randperm(negative.numel())[:num_neg]
             pos_idx = positive[perm1]
@@ -197,7 +197,7 @@ class DeVit(nn.Module):
 
             proposals_per_image = proposals_per_image[sampled_idxs]
             class_labels_i = class_labels_i[sampled_idxs]
-            
+
             gt_boxes_i = (
                 targets_per_image.bboxes[matched_idxs[sampled_idxs]]
                 if len(targets_per_image.bboxes) > 0
@@ -215,21 +215,21 @@ class DeVit(nn.Module):
         matched_gt_boxes = torch.cat(matched_gt_boxes)
 
         # import IPython, sys; IPython.embed(header='forward'); sys.exit()
-        
+
         rois = []
         for bid, box in enumerate(resampled_proposals):
             batch_index = torch.full((len(box), 1), fill_value=float(bid)).to(device)
             rois.append(torch.cat([batch_index, box.to(device)], dim=1))
-            rois = torch.cat(rois)            
+            rois = torch.cat(rois)
 
         roi_features = self.roi_pool(features, rois)  # N, C, k, k
-        roi_bs = len(roi_features)        
-        
+        roi_bs = len(roi_features)
+
         # classification
         roi_features = roi_features.flatten(2)
         bs, spatial_size = roi_features.shape[0], roi_features.shape[-1]
 
-        class_weight = self.train_class_weight[:, :roi_features.shape[-1]]
+        class_weight = self.train_class_weight[:, : roi_features.shape[-1]]
         # (N x spatial x emb) @ (emb x class) = N x spatial x class
         feats = roi_features.transpose(-2, -1) @ class_weight.T
 
@@ -243,7 +243,7 @@ class DeVit(nn.Module):
         else:
             class_topk = num_classes if class_topk == 0 else class_topk
             sample_class_enabled = True
-             
+
         if sample_class_enabled:
             num_active_classes = class_topk
             init_scores = nn.functional.normalize(roi_features.flatten(2).mean(2), dim=1) @ class_weight.T
@@ -261,7 +261,7 @@ class DeVit(nn.Module):
             class_indices = torch.stack(class_indices).to(device)
             class_indices = torch.sort(class_indices, dim=1).values
         else:
-            num_active_classes = num_classes        
+            num_active_classes = num_classes
 
         other_classes = []
         if sample_class_enabled:
@@ -307,7 +307,7 @@ class DeVit(nn.Module):
         )
 
         # TODO: REMOVE
-        bg_feats = roi_features.transpose(-2, -1) @ self.bg_tokens[:, :roi_features.shape[-1]].T  # N x spatial x back
+        bg_feats = roi_features.transpose(-2, -1) @ self.bg_tokens[:, : roi_features.shape[-1]].T  # N x spatial x back
         bg_dist_emb = self.fc_back_class(bg_feats)  # N x spatial x emb
         bg_dist_emb = bg_dist_emb.permute(0, 2, 1).reshape(bs, -1, *roi_pool_size)
         # N x emb x S x S
@@ -324,14 +324,14 @@ class DeVit(nn.Module):
             cls_logits = [v.reshape(bs, num_active_classes) for v in cls_logits]
         else:
             cls_logits = cls_logits.reshape(bs, num_active_classes)
-            
+
         # N x 1
         # feats: N x spatial x class
         cls_dist_feats = self.interpolate(torch.sort(feats, dim=2).values, self.t_len, mode='linear')  # N x spatial x T
         bg_cls_dist_emb = self.fc_bg_class(cls_dist_feats)  # N x spatial x emb
         bg_cls_dist_emb = bg_cls_dist_emb.permute(0, 2, 1).reshape(bs, -1, *roi_pool_size)
         bg_logits = self.bg_cnn(torch.cat([bg_cls_dist_emb, bg_dist_emb], dim=1))
-        
+
         if isinstance(bg_logits, list):
             logits = []
             for c, b in zip(cls_logits, bg_logits):
@@ -340,7 +340,7 @@ class DeVit(nn.Module):
             # N x (classes + 1)
             logits = torch.cat([cls_logits, bg_logits], dim=1)
             logits = logits / self.cls_temp
-            
+
         # loss
         class_labels = class_labels.long().to(device)
         if sample_class_enabled:
@@ -359,18 +359,30 @@ class DeVit(nn.Module):
             loss = self.focal_loss(logits, class_labels, num_classes=num_active_classes, bg_weight=self.bg_cls_weight)
             loss_dict['focal_loss'] = loss
 
-        import IPython, sys; IPython.embed(header='forward'); sys.exit()
+        import IPython, sys
+
+        IPython.embed(header='forward')
+        sys.exit()
 
     @torch.no_grad()
     def forward_once(self, images: List[_Image]) -> Dict[str, Any]:
         proposals = self.get_proposals(images)
-        return {'features': self.mask_generator.predictor.features, 'proposals': proposals}        
+        return {'features': self.mask_generator.predictor.features, 'proposals': proposals}
+
+    @torch.no_grad()
+    def build_image_prototypes(self, image: _Image, instances: Instances) -> ProtoTypes:
+        features = self.mask_generator([image])
+        bboxes = instances.to_tensor().bboxes.to(features.device)
+        roi_feats = self.roi_pool(features, [bboxes])
+        index = 2 if len(roi_feats.shape) == 4 else 1
+        roi_feats = roi_feats.flatten(index).mean(index)
+        return ProtoTypes(embeddings=roi_feats, labels=instances.labels, instances=instances)
 
     def get_proposals(self, images: List[_Image]) -> List[Instances]:
         return [self.mask_generator.get_proposals(image) for image in images]
 
-    def interpolate(self, seq, T, mode='linear', force=False) -> _Tensor:
-        return nn.functional.interpolate(seq, T, mode=mode) if (seq.shape[-1] < T) or force else seq[:, :, -T:]
+    def interpolate(self, seq, x, mode='linear', force=False) -> _Tensor:
+        return nn.functional.interpolate(seq, x, mode=mode) if (seq.shape[-1] < x) or force else seq[:, :, -x:]
 
     def distance_embed(self, x, temperature=10000, num_pos_feats=128, scale=10.0) -> _Tensor:
         # x: [bs, n_dist]
@@ -430,7 +442,7 @@ def devit(
 
     prototypes = ProtoTypes.load(prototype_file)
     background_prototypes = ProtoTypes.load(background_prototype_file)
-    
+
     all_cids = read_text_file(all_classes_fn)
     seen_cids = read_text_file(seen_classes_fn)
 
@@ -440,33 +452,39 @@ def devit(
         prototypes=prototypes,
         background_prototypes=background_prototypes,
         all_cids=all_cids,
-        seen_cids=seen_cids
+        seen_cids=seen_cids,
     )
 
 
 if __name__ == '__main__':
     from torchvision.datapoints import BoundingBoxFormat
-    
+
     fn = '/root/krishneel/Downloads/fs_coco_trainval_novel_10shot.vitl14.pkl'
-    bg = '/root/krishneel/Downloads/background_prototypes.vitb14.pth'    
+    bg = '/root/krishneel/Downloads/background_prototypes.vitb14.pth'
     an = '../../data/coco/all_classes.txt'
     sn = '../../data/coco/seen_classes.txt'
 
-    
     m = devit(
         {'model': 'vit_b', 'checkpoint': None},
         prototype_file=fn,
         background_prototype_file=bg,
         all_classes_fn=an,
-        seen_classes_fn=sn
+        seen_classes_fn=sn,
     )
     m.cuda()
 
     im = Image.open('/root/krishneel/Downloads/000000.jpg')
     proposal = Instances(
         bboxes=[[750, 75, 1800, 1040], [750, 75, 1800, 1040]],
-        bbox_fmt=BoundingBoxFormat.XYXY, class_ids=[1, 1]
+        bbox_fmt=BoundingBoxFormat.XYXY,
+        class_ids=[1, 1],
+        labels=['plate', 'plate'],
     )
     targets = [{'gt_proposal': proposal}]
 
-    m([im], targets=targets)
+    # m([im], targets=targets)
+    x = m.build_image_prototypes(im, proposal)
+    import IPython, sys
+
+    IPython.embed(header='forward')
+    sys.exit()

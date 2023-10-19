@@ -25,6 +25,7 @@ class Instances(object):
     labels: List[str] = field(default_factory=lambda: [])
     class_ids: List[int] = field(default_factory=lambda: [])
     bbox_fmt: BoundingBoxFormat = BoundingBoxFormat.XYWH
+    image_id: str = ""
 
     def __post_init__(self):
         size = max(len(self.bboxes), self.masks.shape[0] if self.masks is not None else 0, len(self.class_ids))

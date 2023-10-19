@@ -28,7 +28,6 @@ class S3CocoDatasetSam(S3CocoDataset):
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
         while True:
-            time.sleep(0.1)
             try:
                 iid = self.ids[index]
                 image, targets = self._load(iid)
@@ -63,6 +62,7 @@ class S3CocoDatasetSam(S3CocoDataset):
             except Exception as e:
                 logger.warning(f'{e} for iid: {iid} index: {index}')
                 index = np.random.choice(np.arange(len(self.ids)))
+                time.sleep(0.1)
 
         return {'image': image, 'sam_feats': sam_feats, 'filename': filename, 'bboxes': bboxes}
 

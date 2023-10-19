@@ -45,7 +45,7 @@ class AttentionPool2d(nn.Module):
 
     def __init__(self, spatial_dim: int, embed_dim: int, num_heads: int, output_dim: int = None):
         super(AttentionPool2d, self).__init__()
-        self.positional_embedding = nn.Parameter(torch.randn(spatial_dim**2 + 1, embed_dim) / embed_dim**0.5)
+        self.positional_embedding = nn.Parameter(torch.randn(spatial_dim ** 2 + 1, embed_dim) / embed_dim ** 0.5)
         self.k_proj = nn.Linear(embed_dim, embed_dim)
         self.q_proj = nn.Linear(embed_dim, embed_dim)
         self.v_proj = nn.Linear(embed_dim, embed_dim)

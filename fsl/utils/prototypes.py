@@ -8,6 +8,8 @@ import os.path as osp
 import numpy as np
 import torch
 
+from fsl.structures import Instances
+
 
 _Tensor = Type[torch.Tensor]
 
@@ -16,12 +18,15 @@ _Tensor = Type[torch.Tensor]
 class ProtoTypes(object):
     embeddings: _Tensor
     labels: List[str]
+    instances: Instances = None
 
     def __post_init__(self):
         if isinstance(self.embeddings, np.ndarray):
             self.embeddings = torch.as_tensor(self.embeddings)
         assert isinstance(self.embeddings, torch.Tensor)
-        assert self.embeddings.shape[0] == len(self.labels), f'Size mismatch {self.embedding.shape} != {len(self.labels)}'
+        assert self.embeddings.shape[0] == len(
+            self.labels
+        ), f'Size mismatch {self.embedding.shape} != {len(self.labels)}'
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
         return {'embedding': self.embeddings[index], 'label': self.labels[index]}
@@ -32,9 +37,9 @@ class ProtoTypes(object):
         embeddings = torch.cat([self.embeddings, other.embeddings], dim=0)
         labels = self.labels + other.labels
         return ProtoTypes(embeddings, labels)
-    
+
     def __len__(self) -> int:
-        return slef.embeddings.shape[0]
+        return self.embeddings.shape[0]
 
     def __copy__(self) -> 'ProtoTypes':
         return ProtoTypes(self.embeddings.clone(), deepcopy(self.labels))
@@ -48,11 +53,15 @@ class ProtoTypes(object):
             pt.embeddings = torch.cat([pt.embeddings, torch.zeros(1, *pt.embeddings.shape[1:])], dim=0)
         return pt
 
+    def to(self, device: str) -> 'ProtoTypes':
+        self.embeddings = self.embeddings.to(device)
+        return self
+
     @property
     def normalized_embedding(self) -> _Tensor:
         embeddings = self.embeddings.mean(dim=1) if len(self.embeddings.shape) == 3 else self.embeddings
         return torch.nn.functional.normalize(embeddings, dim=-1)
-    
+
     @classmethod
     def load(
         cls, filenames: Union[List[str], str], keys: List[str] = ['prototypes', 'label_names']

@@ -13,11 +13,7 @@ _Tensor = Type[torch.Tensor]
 
 
 def prepare_noisy_boxes(
-    gt_boxes: List[_Tensor],
-    im_shape: List[int],
-    bb_fmt: BBFmt = BBFmt.XYXY,        
-    box_noise_scale: float = 1.0,
-    n: int = 5
+    gt_boxes: List[_Tensor], im_shape: List[int], bb_fmt: BBFmt = BBFmt.XYXY, box_noise_scale: float = 1.0, n: int = 5
 ) -> List[_Tensor]:
     # assert isinstance(gt_boxes, torch.Tensor)
     noisy_boxes = []
