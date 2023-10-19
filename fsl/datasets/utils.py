@@ -1,25 +1,30 @@
 #!/usr/bin/env python
 
-from typing import List, Union
+from typing import List, Union, Type
 
 import numpy as np
 import torch
 
 from torchvision.transforms.v2 import functional
-from torchvision.datapoints import BoundingBoxFormat
+from torchvision.datapoints import BoundingBoxFormat as BBFmt
 
-from fsl.structures import Proposal
+
+_Tensor = Type[torch.Tensor]
 
 
 def prepare_noisy_boxes(
-    gt_boxes: Union[List[Proposal], Proposal], im_shape: List[int], box_noise_scale: float = 1.0, n: int = 5
-) -> Union[List[Proposal], Proposal]:
-    gt_boxes = [gt_boxes] if not isinstance(gt_boxes, list) else gt_boxes
+    gt_boxes: List[_Tensor],
+    im_shape: List[int],
+    bb_fmt: BBFmt = BBFmt.XYXY,        
+    box_noise_scale: float = 1.0,
+    n: int = 5
+) -> List[_Tensor]:
+    # assert isinstance(gt_boxes, torch.Tensor)
     noisy_boxes = []
     h, w = np.array(im_shape, dtype=np.float32)
-    for proposal in gt_boxes:
-        proposals = proposal.to_tensor().repeat(n)
-        box_ccwh = torch.stack([p.convert_bbox_fmt(BoundingBoxFormat.CXCYWH).bbox for p in proposals])
+    for box in gt_boxes:
+        box = box.repeat(n, 1)
+        box_ccwh = functional.convert_format_bounding_box(box, bb_fmt, BBFmt.CXCYWH)
 
         diff = torch.zeros_like(box_ccwh)
         diff[:, :2] = box_ccwh[:, 2:] / 2
@@ -29,14 +34,13 @@ def prepare_noisy_boxes(
         rand_part = torch.rand_like(box_ccwh) * rand_sign
         box_ccwh = box_ccwh + torch.mul(rand_part, diff) * box_noise_scale
 
-        noisy_box = functional.convert_format_bounding_box(box_ccwh, BoundingBoxFormat.CXCYWH, BoundingBoxFormat.XYXY)
+        noisy_box = functional.convert_format_bounding_box(box_ccwh, BBFmt.CXCYWH, bb_fmt)
 
         noisy_box[:, 0].clamp_(min=0.0, max=im_shape[1])
         noisy_box[:, 2].clamp_(min=0.0, max=im_shape[1])
         noisy_box[:, 1].clamp_(min=0.0, max=im_shape[0])
         noisy_box[:, 3].clamp_(min=0.0, max=im_shape[0])
 
-        for b in noisy_box:
-            noisy_boxes.append(Proposal(bbox=b, bbox_fmt=BoundingBoxFormat.XYXY))
+        noisy_boxes.append(noisy_box)
 
     return noisy_boxes

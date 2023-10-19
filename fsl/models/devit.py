@@ -13,7 +13,7 @@ from PIL import Image
 
 from igniter.registry import model_registry
 
-from fsl.structures import Proposal
+from fsl.structures import Instances
 from fsl.datasets import utils
 from fsl.utils.prototypes import ProtoTypes
 
@@ -150,40 +150,31 @@ class DeVit(nn.Module):
 
         num_classes = len(self.train_class_weight)
         device = self.mask_generator.predictor.device  # TODO
-        assert targets is not None and isinstance(targets, list)
+        assert targets is not None and len(targets) == len(images)
 
         # proposals
-        gt_proposals = [target['gt_proposal'] for target in targets]
-        print(gt_proposals)
-        
-        # pred_proposals = self.get_proposals(images)
-        noisy_proposals = [
-            utils.prepare_noisy_boxes(gt_proposal, im.size[::-1]) for gt_proposal, im in zip(gt_proposals, images)
-        ]
-        
-        noisy_proposals = torch.stack(
-            [p.bbox.reshape(-1, 4) for noisy_proposal in noisy_proposals for p in noisy_proposal]
-        )
-        gt_proposals = [gt_proposal.bbox.reshape(-1, 4) for gt_proposal in gt_proposals]
-
-        boxes = [torch.cat([gt_proposals[i], noisy_proposals[i]]) for i in range(len(targets))]
+        gt_instances = [target['gt_proposal'] for target in targets]
+        gt_bboxes = [gt_proposal.to_tensor().bboxes for gt_proposal in gt_instances]
+        noisy_proposals = utils.prepare_noisy_boxes(gt_bboxes, im.size[::-1])
+        boxes = [torch.cat([gt_bboxes[i], noisy_proposals[i]]) for i in range(len(targets))]
         
         # embedding of the images
         features = self.mask_generator(images)
 
         class_labels, matched_gt_boxes, resampled_proposals = [], [], []
         num_bg_samples, num_fg_samples, gt_masks = [], [], []
-        for i, (proposals_per_image, targets_per_image) in enumerate(zip(boxes, gt_proposals)):
-            match_quality_matrix = box_iou(targets_per_image, proposals_per_image)
+        for i, (proposals_per_image, targets_per_image) in enumerate(zip(boxes, gt_instances)):
+            targets_per_image = targets_per_image.to_tensor()
+            
+            match_quality_matrix = box_iou(targets_per_image.bboxes, proposals_per_image)
             matched_idxs, matched_labels = self.proposal_matcher(match_quality_matrix)
 
-            # class_labels_i = targets_per_image[matched_idxs]
-            class_labels_i = torch.Tensor([0, 0])
+            class_labels_i = targets_per_image.class_ids[matched_idxs]
             if len(class_labels_i) == 0:
                 # no annotation on this image
                 assert torch.all(matched_labels == 0)
                 class_labels_i = torch.zeros_like(matched_idxs)
-            
+                
             class_labels_i[matched_labels == 0] = num_classes
             class_labels_i[matched_labels == -1] = -1
 
@@ -208,8 +199,8 @@ class DeVit(nn.Module):
             class_labels_i = class_labels_i[sampled_idxs]
             
             gt_boxes_i = (
-                targets_per_image[matched_idxs[sampled_idxs]]
-                if len(targets_per_image) > 0
+                targets_per_image.bboxes[matched_idxs[sampled_idxs]]
+                if len(targets_per_image.bboxes) > 0
                 else torch.zeros(len(sampled_idxs), 4, device=device)
             )  # not used anyway
 
@@ -223,6 +214,8 @@ class DeVit(nn.Module):
         class_labels = torch.cat(class_labels)
         matched_gt_boxes = torch.cat(matched_gt_boxes)
 
+        # import IPython, sys; IPython.embed(header='forward'); sys.exit()
+        
         rois = []
         for bid, box in enumerate(resampled_proposals):
             batch_index = torch.full((len(box), 1), fill_value=float(bid)).to(device)
@@ -366,15 +359,14 @@ class DeVit(nn.Module):
             loss = self.focal_loss(logits, class_labels, num_classes=num_active_classes, bg_weight=self.bg_cls_weight)
             loss_dict['focal_loss'] = loss
 
-        import IPython, sys; IPython.embed(header="Forward"); sys.exit()
+        import IPython, sys; IPython.embed(header='forward'); sys.exit()
 
-            
     @torch.no_grad()
     def forward_once(self, images: List[_Image]) -> Dict[str, Any]:
         proposals = self.get_proposals(images)
         return {'features': self.mask_generator.predictor.features, 'proposals': proposals}        
 
-    def get_proposals(self, images: List[_Image]) -> List[List[Proposal]]:
+    def get_proposals(self, images: List[_Image]) -> List[Instances]:
         return [self.mask_generator.get_proposals(image) for image in images]
 
     def interpolate(self, seq, T, mode='linear', force=False) -> _Tensor:
@@ -471,7 +463,10 @@ if __name__ == '__main__':
     m.cuda()
 
     im = Image.open('/root/krishneel/Downloads/000000.jpg')
-    proposal = Proposal(bbox=[750, 75, 1800, 1040], bbox_fmt=BoundingBoxFormat.XYXY, label=1)
+    proposal = Instances(
+        bboxes=[[750, 75, 1800, 1040], [750, 75, 1800, 1040]],
+        bbox_fmt=BoundingBoxFormat.XYXY, class_ids=[1, 1]
+    )
     targets = [{'gt_proposal': proposal}]
 
     m([im], targets=targets)
