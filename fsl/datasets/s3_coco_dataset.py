@@ -122,7 +122,7 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
             indices = np.random.choice(len(bboxes), self.instances_per_batch, replace=True)
             bboxes = [bboxes[index] for index in indices]
             category_ids = [category_ids[index] for index in indices]
-        return {'image': image, 'bboxes': bboxes, 'category_ids': category_ids}
+        return {'image': image, 'bboxes': bboxes, 'category_ids': category_ids, 'image_id': iid}
 
 
 @func_registry('collate_data')
@@ -130,5 +130,7 @@ def collate_data(batches: List[Dict[str, Any]]) -> List[Any]:
     images, targets = [], []
     for batch in batches:
         images.append(batch['image'])
-        targets.append({'bboxes': batch['bboxes'], 'category_ids': batch['category_ids']})
+        targets.append(
+            {'bboxes': batch['bboxes'], 'category_ids': batch['category_ids'], 'image_id': batch['image_id']}
+        )
     return images, targets

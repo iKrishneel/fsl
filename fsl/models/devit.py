@@ -96,21 +96,12 @@ class DeVit(nn.Module):
         self,
         mask_generator,
         proposal_matcher,
-        prototypes: ProtoTypes,
-        background_prototypes: ProtoTypes = None,
-        all_cids=[],
-        seen_cids=[],
         roi_pool_size: int = 16,
     ):
         super(DeVit, self).__init__()
         self.mask_generator = mask_generator
         self.proposal_matcher = proposal_matcher
         self.roi_pool = RoIAlign(roi_pool_size, spatial_scale=1 / mask_generator.predictor.downsize, sampling_ratio=-1)
-
-        self.setup_prototypes(prototypes, all_cids, seen_cids)
-
-        if background_prototypes is not None:
-            self.register_buffer('bg_tokens', background_prototypes.embeddings)
 
         # TODO: Configure this
         self.batch_size_per_image = 128
@@ -126,7 +117,6 @@ class DeVit(nn.Module):
 
         self.fc_other_class = nn.Linear(self.t_len, self.temb)
         self.fc_intra_class = nn.Linear(self.t_pos_emb, self.temb)
-        self.fc_back_class = nn.Linear(len(self.bg_tokens), self.t_bg_emb)
         self.fc_bg_class = nn.Linear(self.t_len, self.temb)
 
         cls_input_dim = self.temb * 2 + self.t_bg_emb
@@ -135,14 +125,20 @@ class DeVit(nn.Module):
         self.per_cls_cnn = PropagateNet(cls_input_dim, hidden_dim, num_layers=num_cls_layers)
         self.bg_cnn = PropagateNet(bg_input_dim, hidden_dim, num_layers=num_cls_layers)
 
-    def setup_prototypes(self, prototypes: ProtoTypes, all_cids: List[str], seen_cids: List[str] = None):
-        pt = prototypes.check(all_cids)
-        train_class_order = [pt.labels.index(c) for c in seen_cids]
-        test_class_order = [pt.labels.index(c) for c in all_cids]
-        assert -1 not in train_class_order and -1 not in test_class_order
+    def setup_prototypes(
+        self, prototypes: ProtoTypes, all_cids: List[str] = None, seen_cids: List[str] = None, is_bg: bool = False
+    ) -> None:
+        if is_bg:
+            self.register_buffer('bg_tokens', prototypes.embeddings)
+            self.fc_back_class = nn.Linear(len(self.bg_tokens), self.t_bg_emb)
+        else:
+            pt = prototypes.check(all_cids)
+            train_class_order = [pt.labels.index(c) for c in seen_cids]
+            test_class_order = [pt.labels.index(c) for c in all_cids]
+            assert -1 not in train_class_order and -1 not in test_class_order
 
-        self.register_buffer('train_class_weight', pt.normalized_embedding[torch.as_tensor(train_class_order)])
-        self.register_buffer('test_class_weight', pt.normalized_embedding[torch.as_tensor(test_class_order)])
+            self.register_buffer('train_class_weight', pt.normalized_embedding[torch.as_tensor(train_class_order)])
+            self.register_buffer('test_class_weight', pt.normalized_embedding[torch.as_tensor(test_class_order)])
 
     def forward(self, images: List[_Image], targets: Dict[str, Any] = None):
         if not self.training:
@@ -372,8 +368,8 @@ class DeVit(nn.Module):
     @torch.no_grad()
     def build_image_prototypes(self, image: _Image, instances: Instances) -> ProtoTypes:
         features = self.mask_generator([image])
-        bboxes = instances.to_tensor().bboxes.to(features.device)
-        roi_feats = self.roi_pool(features, [bboxes])
+        instances = instances.to_tensor(features.device)
+        roi_feats = self.roi_pool(features, [instances.bboxes])
         index = 2 if len(roi_feats.shape) == 4 else 1
         roi_feats = roi_feats.flatten(index).mean(index)
         return ProtoTypes(embeddings=roi_feats, labels=instances.labels, instances=instances)
@@ -433,27 +429,26 @@ def devit(
     background_prototype_file: str = None,
     all_classes_fn: str = None,
     seen_classes_fn: str = None,
-):
+) -> DeVit:
     from fsl.models.sam_relational import build_sam_auto_mask_generator
     from fsl.utils.matcher import Matcher
 
     mask_generator = build_sam_auto_mask_generator(sam_args, mask_gen_args)
     proposal_matcher = Matcher([0.3, 0.7], [0, -1, 1])
 
-    prototypes = ProtoTypes.load(prototype_file)
-    background_prototypes = ProtoTypes.load(background_prototype_file)
+    devit = DeVit(mask_generator, proposal_matcher=proposal_matcher)
 
-    all_cids = read_text_file(all_classes_fn)
-    seen_cids = read_text_file(seen_classes_fn)
+    if all_classes_fn and seen_classes_fn and prototype_file:
+        prototypes = ProtoTypes.load(prototype_file)
+        all_cids = read_text_file(all_classes_fn)
+        seen_cids = read_text_file(seen_classes_fn)
+        devit.setup_prototypes(prototypes, all_cids, seen_cids, is_bg=False)
 
-    return DeVit(
-        mask_generator,
-        proposal_matcher=proposal_matcher,
-        prototypes=prototypes,
-        background_prototypes=background_prototypes,
-        all_cids=all_cids,
-        seen_cids=seen_cids,
-    )
+    if background_prototype_file:
+        background_prototypes = ProtoTypes.load(background_prototype_file)
+        devit.setup_prototypes(background_prototypes, is_bg=True)
+
+    return devit
 
 
 if __name__ == '__main__':
@@ -466,10 +461,10 @@ if __name__ == '__main__':
 
     m = devit(
         {'model': 'vit_b', 'checkpoint': None},
-        prototype_file=fn,
-        background_prototype_file=bg,
-        all_classes_fn=an,
-        seen_classes_fn=sn,
+        # prototype_file=fn,
+        # background_prototype_file=bg,
+        # all_classes_fn=an,
+        # seen_classes_fn=sn,
     )
     m.cuda()
 

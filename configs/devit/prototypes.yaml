@@ -1,0 +1,42 @@
+driver: torch
+device: "cuda"
+
+models:
+  devit:
+    sam_args:
+      model: "vit_b"
+
+datasets:
+  dataloader:
+    batch_size: 1
+    num_workers: 0
+    shuffle: False
+    pin_memory: True
+    collate_fn: "collate_data"
+  coco:
+    val:
+      bucket_name: &bucket "sr-shokunin"
+      root: "perception/datasets/coco/val2017"
+      anno_fn: "perception/datasets/coco/annotations/instances_val2017.json"
+
+transforms:
+  val:
+    engine: "torchvision.transforms"
+    ResizeLongestSide:
+      size: 1024
+    PadToSize:
+      size: 1024
+
+io:
+  file_io:
+    engine: 'prototype_writer'
+    root: "/root/krishneel/Downloads/fsl/prototypes/"
+
+build:
+  devit:
+    dataset: "coco"
+    val:
+      func: "prototype_forward"
+      transforms: "val"
+
+  model: "devit"

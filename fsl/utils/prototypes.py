@@ -24,9 +24,10 @@ class ProtoTypes(object):
         if isinstance(self.embeddings, np.ndarray):
             self.embeddings = torch.as_tensor(self.embeddings)
         assert isinstance(self.embeddings, torch.Tensor)
+
         assert self.embeddings.shape[0] == len(
             self.labels
-        ), f'Size mismatch {self.embedding.shape} != {len(self.labels)}'
+        ), f'Size mismatch {self.embeddings.shape} != {len(self.labels)}'
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
         return {'embedding': self.embeddings[index], 'label': self.labels[index]}
