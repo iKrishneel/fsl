@@ -18,10 +18,18 @@ datasets:
       bucket_name: &bucket "sr-shokunin"
       root: "perception/datasets/coco/val2017"
       anno_fn: "perception/datasets/coco/annotations/instances_val2017.json"
+  fs_coco:
+    val:
+      bucket_name: *bucket
+      root: "perception/datasets/coco/train2017"
+      json_file: "/root/krishneel/Downloads/coco/fs_coco_trainval_novel_5shot.json"
 
 transforms:
   val:
     engine: "torchvision.transforms"
+    ConvertFormatBoundingBox:
+      old_fmt: "XYWH"
+      new_fmt: "XYXY"
     ResizeLongestSide:
       size: 1024
     PadToSize:
@@ -34,7 +42,7 @@ io:
 
 build:
   devit:
-    dataset: "coco"
+    dataset: "fs_coco"
     val:
       func: "prototype_forward"
       transforms: "val"

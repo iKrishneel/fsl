@@ -31,15 +31,15 @@ def file_writer(io_cfg: Dict[str, str]) -> Callable:
 @func_registry
 def prototype_forward(engine, batch) -> None:
     for image, instances in zip(*batch):
-        image_id = instances['image_id']
+        image_ids = instances['image_ids']
         instances = Instances(
             bboxes=instances['bboxes'],
             class_ids=instances['category_ids'],
             labels=instances['category_ids'],
-            image_id=image_id,
+            image_id=image_ids,
         )
         prototypes = engine._model.build_image_prototypes(image, instances)
-        engine.file_io(prototypes, image_id)
+        engine.file_io(prototypes, image_ids[0])
 
 
 @engine_registry('prototype_engine')

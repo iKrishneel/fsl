@@ -99,6 +99,17 @@ class VHFlip(nn.Module):
 
 
 @transform_registry
+class ConvertFormatBoundingBox(nn.Module):
+    def __init__(self, old_fmt: str, new_fmt: str):
+        super(ConvertFormatBoundingBox, self).__init__()
+        self.old_fmt, self.new_fmt = [getattr(BoundingBoxFormat, fmt) for fmt in [old_fmt, new_fmt]]
+
+    def forward(self, image: _Image, bboxes: List[_Tensor]):
+        bboxes = [TF.convert_format_bounding_box(bbox, self.old_fmt, self.new_fmt) for bbox in bboxes]
+        return image, bboxes
+
+
+@transform_registry
 class ClipPreprocess(nn.Module):
     def __init__(
         self,
