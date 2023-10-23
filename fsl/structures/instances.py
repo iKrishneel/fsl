@@ -1,18 +1,17 @@
 #!/usr/bin/env python
 
-from typing import Any, Dict, List, Union
-from dataclasses import dataclass, field
-
 from copy import deepcopy
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Union
+
 import numpy as np
 import torch
-
 import torchvision
 
 torchvision.disable_beta_transforms_warning()
 
-from torchvision.transforms.v2 import functional
 from torchvision.datapoints import BoundingBoxFormat
+from torchvision.transforms.v2 import functional
 
 Coord = Union[List[int], np.ndarray, torch.Tensor]
 Array = Union[np.ndarray, torch.Tensor]

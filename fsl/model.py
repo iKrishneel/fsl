@@ -1,15 +1,13 @@
 #!/usr/bin/evn python
 
-from typing import Any, Dict, List, Type, Callable, Iterator, Union, Tuple
-
 import os.path as osp
+from typing import Any, Callable, Dict, Iterator, List, Tuple, Type, Union
+
 import numpy as np
+import torch
 from PIL import Image
 
-import torch
-
 from fsl.models import sam_relational_network
-
 
 if __name__ == '__main__':
     m = sam_relational_network(

@@ -1,20 +1,18 @@
 #!/usr/bin/evn python
 
-from typing import Any, Dict, List, Type, Callable, Iterator, Union, Tuple
-
 import os.path as osp
-import numpy as np
-from PIL import Image
+from typing import Any, Callable, Dict, Iterator, List, Tuple, Type, Union
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-from torchvision.ops import RoIAlign
-
-from segment_anything import sam_model_registry
-from segment_anything import SamAutomaticMaskGenerator as _SAMG, SamPredictor as _SamPredictor
 from igniter.registry import model_registry
+from PIL import Image
+from segment_anything import SamAutomaticMaskGenerator as _SAMG
+from segment_anything import SamPredictor as _SamPredictor
+from segment_anything import sam_model_registry
+from torchvision.ops import RoIAlign
 
 from fsl.datasets.s3_coco_dataset import S3CocoDatasetSam
 from fsl.structures import Proposal
@@ -265,7 +263,9 @@ class SamRelationNetwork(nn.Module):
         roi_feats = self.condenser(roi_feats)
         y_pred = self.relation_net(roi_feats)
 
-        import IPython, sys
+        import sys
+
+        import IPython
 
         IPython.embed(header="forward")
         sys.exit()

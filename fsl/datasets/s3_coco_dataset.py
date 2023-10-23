@@ -1,24 +1,23 @@
 #!/usr/bin/env python
 
+import contextlib
+import io
+import json
 import os
 import time
-import io
-import contextlib
-
 from typing import Any, Dict, List
 
-import json
-from omegaconf import OmegaConf, DictConfig
 import numpy as np
 import torch
 import torchvision
+from omegaconf import DictConfig, OmegaConf
 
 torchvision.disable_beta_transforms_warning()
 
-from torchvision.datapoints import BoundingBoxFormat
 from igniter.datasets import S3CocoDataset, S3Dataset
 from igniter.logger import logger
 from igniter.registry import dataset_registry, func_registry
+from torchvision.datapoints import BoundingBoxFormat
 
 from fsl.structures import Proposal
 
@@ -96,7 +95,7 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
 
         labels = list(labels)
         self.label_mapping = {labels[i]: i for i in range(len(labels))}
-        self.instances_per_batch = kwargs.get('instances_per_batch', 10)
+        # self.instances_per_batch = kwargs.get('instances_per_batch', 10)
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
         while True:
@@ -107,13 +106,13 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
                 assert len(targets) > 0
 
                 # FIXME: Add targets transform parsing directly from config
-                category_ids = []
-                bboxes = []
-                for target in targets:
-                    # if any(side < 20 for side in target['bbox'][2:]):
-                    #     continue
-                    category_ids.append(self.label_mapping[target['category_id']])
-                    bboxes.append(torch.Tensor(self.xywh_to_xyxy(target['bbox'])))
+                category_ids = [target['category_id'] for target in targets]
+                bboxes = [torch.Tensor(target['bbox']) for target in targets]
+                # for target in targets:
+                # if any(side < 20 for side in target['bbox'][2:]):
+                #     continue
+                # category_ids.append(self.label_mapping[target['category_id']])
+                # bboxes.append(torch.Tensor(self.xywh_to_xyxy(target['bbox'])))
 
                 assert len(bboxes) > 0, 'Empty bounding boxes'
 
@@ -125,11 +124,13 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
                 logger.warning(f'{e} for iid: {iid} index: {index}')
                 index = np.random.choice(np.arange(len(self.ids)))
 
+        """
         if self.instances_per_batch > 0:
             indices = np.random.choice(len(bboxes), self.instances_per_batch, replace=True)
             bboxes = [bboxes[index] for index in indices]
             category_ids = [category_ids[index] for index in indices]
-        return {'image': image, 'bboxes': bboxes, 'category_ids': category_ids, 'image_ids': iid}
+        """
+        return {'image': image, 'bboxes': bboxes, 'category_ids': category_ids, 'image_ids': [iid]}
 
 
 @dataset_registry('fs_coco')
@@ -140,12 +141,15 @@ class S3CocoDatasetFS(S3CocoDataset):
         root: str,
         json_file: str,
         shot: int = 5,
-        filename_signature:str = 'full_box_%sshot_%s_trainval.json',
-        **kwargs
+        filename_signature: str = 'full_box_%sshot_%s_trainval.json',
+        **kwargs,
     ) -> None:
         split_dir = os.path.join(os.path.dirname(json_file), 'cocosplit2017/seed1')
         assert os.path.isdir(split_dir), f'Directory not found {split_dir}'
         anno_dict = load_json(json_file)
+
+        anno_dict.thing_classes = anno_dict.base_classes
+        anno_dict.thing_dataset_id_to_contiguous_id = anno_dict.base_dataset_id_to_contiguous_id
 
         fileids = {}
         for idx, class_name in enumerate(anno_dict.thing_classes):
@@ -161,7 +165,7 @@ class S3CocoDatasetFS(S3CocoDataset):
         categories = {}
         for _, fileids_ in fileids.items():
             dicts = []
-            for (img_dict, anno_dict_list) in fileids_:
+            for img_dict, anno_dict_list in fileids_:
                 for anno in anno_dict_list:
                     record = {}
                     record['file_name'] = img_dict['file_name']
@@ -173,10 +177,11 @@ class S3CocoDatasetFS(S3CocoDataset):
                     assert anno.get('ignore', 0) == 0
 
                     obj = {key: anno[key] for key in ann_keys if key in anno}
-                    
+
                     # obj['bbox_mode'] = BoundingBoxFormat.XYWH.name
                     category_id = anno_dict.thing_dataset_id_to_contiguous_id[str(obj['category_id'])]
 
+                    obj['category_name'] = anno_dict.thing_classes[category_id]
                     obj['category_id'] = category_id
                     categories[category_id] = anno_dict.thing_classes[category_id]
 
@@ -187,7 +192,7 @@ class S3CocoDatasetFS(S3CocoDataset):
             dataset_dicts.extend(dicts)
 
         categories = [{'id': key, 'name': val} for key, val in categories.items()]
-            
+
         images, annotations = [], []
         anno_id = 1
         for dataset_dict in dataset_dicts:
@@ -196,7 +201,8 @@ class S3CocoDatasetFS(S3CocoDataset):
                     'id': dataset_dict['image_id'],
                     'file_name': dataset_dict['file_name'],
                     'height': dataset_dict['height'],
-                    'width': dataset_dict['width']}
+                    'width': dataset_dict['width'],
+                }
             )
             for anno in dataset_dict['annotations']:
                 anno['id'] = anno_id
@@ -216,14 +222,22 @@ class S3CocoDatasetFS(S3CocoDataset):
         image, targets = super().__getitem__(index)
         bboxes = [torch.FloatTensor(target['bbox']) for target in targets]
         category_ids = [target['category_id'] for target in targets]
+        category_names = [target['category_name'] for target in targets]
         image_ids = [target['image_id'] for target in targets]
 
         assert len(bboxes) > 0, 'Empty bounding boxes'
 
-        for transform in self.transforms.transforms:
-            image, bboxes = transform(image, bboxes)
+        if self.transforms is not None:
+            for transform in self.transforms.transforms:
+                image, bboxes = transform(image, bboxes)
 
-        return {'image': image, 'bboxes': bboxes, 'category_ids': category_ids, 'image_ids': image_ids}
+        return {
+            'image': image,
+            'bboxes': bboxes,
+            'category_ids': category_ids,
+            'image_ids': image_ids,
+            'category_names': category_names,
+        }
 
 
 def load_coco(json_file):
@@ -232,7 +246,8 @@ def load_coco(json_file):
     with contextlib.redirect_stdout(io.StringIO()):
         coco_api = COCO(json_file)
     return coco_api
-    
+
+
 def load_json(filename: str) -> DictConfig:
     assert os.path.isfile(filename), f'Invalid filename {filename}'
     return OmegaConf.load(filename)
@@ -242,10 +257,8 @@ def load_json(filename: str) -> DictConfig:
 def collate_data(batches: List[Dict[str, Any]]) -> List[Any]:
     images, targets = [], []
     for batch in batches:
-        images.append(batch['image'])
-        targets.append(
-            {'bboxes': batch['bboxes'], 'category_ids': batch['category_ids'], 'image_ids': batch['image_ids']}
-        )
+        images.append(batch.pop('image'))
+        targets.append(batch)
     return images, targets
 
 
@@ -256,4 +269,6 @@ if __name__ == '__main__':
 
     s = S3CocoDatasetFS(bucket_name, root, json_file=json_file)
     x = s[0]
-    import IPython; IPython.embed()
+    import IPython
+
+    IPython.embed()

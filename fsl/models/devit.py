@@ -1,22 +1,19 @@
 #!/usr/bin/env python
 
-from typing import Any, Type, Dict, List, Tuple
 from dataclasses import dataclass
+from typing import Any, Dict, List, Tuple, Type
 
+import numpy as np
 import torch
 import torch.nn as nn
+from igniter.registry import model_registry
+from PIL import Image
 from torchvision.ops import RoIAlign
 from torchvision.ops.boxes import box_area, box_iou
 
-import numpy as np
-from PIL import Image
-
-from igniter.registry import model_registry
-
-from fsl.structures import Instances
 from fsl.datasets import utils
+from fsl.structures import Instances
 from fsl.utils.prototypes import ProtoTypes
-
 
 _Image = Type[Image.Image]
 _Tensor = Type[torch.Tensor]
@@ -97,6 +94,10 @@ class DeVit(nn.Module):
         mask_generator,
         proposal_matcher,
         roi_pool_size: int = 16,
+        fg_prototypes: ProtoTypes = None,
+        bg_prototypes: ProtoTypes = None,
+        all_cids: List[str] = None,
+        seen_cids: List[str] = None,
     ):
         super(DeVit, self).__init__()
         self.mask_generator = mask_generator
@@ -112,25 +113,37 @@ class DeVit(nn.Module):
         self.t_pos_emb = 128
         self.t_bg_emb = 128
         self.cls_temp = 0.1
-        self.bg_cls_weight = 0.2
-        hidden_dim = 256
+        self.hidden_dim = 256
+
+        cls_input_dim = self.temb * 2
+
+        if fg_prototypes:
+            self._setup_prototypes(fg_prototypes, all_cids, seen_cids, is_bg=False)
+        if bg_prototypes:
+            self._setup_prototypes(bg_prototypes, all_cids, seen_cids, is_bg=True)
+            self.bg_cls_weight = 0.2
+            cls_input_dim += self.t_bg_emb
+        else:
+            self.bg_tokens = None
+            self.fc_back_class = None
+            self.bg_cnn = None
+            self.bg_cls_weight = 0.0
 
         self.fc_other_class = nn.Linear(self.t_len, self.temb)
         self.fc_intra_class = nn.Linear(self.t_pos_emb, self.temb)
-        self.fc_bg_class = nn.Linear(self.t_len, self.temb)
 
-        cls_input_dim = self.temb * 2 + self.t_bg_emb
-        bg_input_dim = self.temb + self.t_bg_emb
         num_cls_layers = 3
-        self.per_cls_cnn = PropagateNet(cls_input_dim, hidden_dim, num_layers=num_cls_layers)
-        self.bg_cnn = PropagateNet(bg_input_dim, hidden_dim, num_layers=num_cls_layers)
+        self.per_cls_cnn = PropagateNet(cls_input_dim, self.hidden_dim, num_layers=num_cls_layers)
 
-    def setup_prototypes(
+    def _setup_prototypes(
         self, prototypes: ProtoTypes, all_cids: List[str] = None, seen_cids: List[str] = None, is_bg: bool = False
     ) -> None:
         if is_bg:
             self.register_buffer('bg_tokens', prototypes.embeddings)
+            self.fc_bg_class = nn.Linear(self.t_len, self.temb)
             self.fc_back_class = nn.Linear(len(self.bg_tokens), self.t_bg_emb)
+            bg_input_dim = self.temb + self.t_bg_emb
+            self.bg_cnn = PropagateNet(bg_input_dim, self.hidden_dim, num_layers=num_cls_layers)
         else:
             pt = prototypes.check(all_cids)
             train_class_order = [pt.labels.index(c) for c in seen_cids]
@@ -302,16 +315,31 @@ class DeVit(nn.Module):
             .reshape(bs * num_active_classes, -1, *[self.roi_pool.output_size] * 2)
         )
 
-        # TODO: REMOVE
-        bg_feats = roi_features.transpose(-2, -1) @ self.bg_tokens[:, : roi_features.shape[-1]].T  # N x spatial x back
-        bg_dist_emb = self.fc_back_class(bg_feats)  # N x spatial x emb
-        bg_dist_emb = bg_dist_emb.permute(0, 2, 1).reshape(bs, -1, *roi_pool_size)
-        # N x emb x S x S
-        bg_dist_emb_c = bg_dist_emb[:, None, :, :, :].expand(-1, num_active_classes, -1, -1, -1).flatten(0, 1)
-        # (Nxclasses) x emb x S x S
+        # N x 1
+        # feats: N x spatial x class
+        cls_dist_feats = self.interpolate(torch.sort(feats, dim=2).values, self.t_len, mode='linear')  # N x spatial x T
 
-        # (Nxclasses) x EMB x S x S
-        per_cls_input = torch.cat([intra_dist_emb, inter_dist_emb, bg_dist_emb_c], dim=1)
+        # TODO: REMOVE THE ROI SIZE
+        if self.bg_tokens is not None and self.fc_back_class is not None:
+            # N x spatial x back
+            bg_feats = roi_features.transpose(-2, -1) @ self.bg_tokens[:, : roi_features.shape[-1]].T
+            bg_dist_emb = self.fc_back_class(bg_feats)  # N x spatial x emb
+            bg_dist_emb = bg_dist_emb.permute(0, 2, 1).reshape(bs, -1, *roi_pool_size)
+            # N x emb x S x S
+            bg_dist_emb_c = bg_dist_emb[:, None, :, :, :].expand(-1, num_active_classes, -1, -1, -1).flatten(0, 1)
+            # (Nxclasses) x emb x S x S
+
+            # (Nxclasses) x EMB x S x S
+            # per_cls_input = torch.cat([intra_dist_emb, inter_dist_emb, bg_dist_emb_c], dim=1)
+            per_cls_input = torch.cat([per_cls_input, bg_dist_emb_c], dim=1)
+
+            bg_cls_dist_emb = self.fc_bg_class(cls_dist_feats)  # N x spatial x emb
+            bg_cls_dist_emb = bg_cls_dist_emb.permute(0, 2, 1).reshape(bs, -1, *roi_pool_size)
+            bg_logits = self.bg_cnn(torch.cat([bg_cls_dist_emb, bg_dist_emb], dim=1))
+        else:
+            per_cls_input = torch.cat([intra_dist_emb, inter_dist_emb], dim=1)
+            bg_logits = None
+
         # (Nxclasses) x 1
         cls_logits = self.per_cls_cnn(per_cls_input)
 
@@ -321,21 +349,16 @@ class DeVit(nn.Module):
         else:
             cls_logits = cls_logits.reshape(bs, num_active_classes)
 
-        # N x 1
-        # feats: N x spatial x class
-        cls_dist_feats = self.interpolate(torch.sort(feats, dim=2).values, self.t_len, mode='linear')  # N x spatial x T
-        bg_cls_dist_emb = self.fc_bg_class(cls_dist_feats)  # N x spatial x emb
-        bg_cls_dist_emb = bg_cls_dist_emb.permute(0, 2, 1).reshape(bs, -1, *roi_pool_size)
-        bg_logits = self.bg_cnn(torch.cat([bg_cls_dist_emb, bg_dist_emb], dim=1))
-
-        if isinstance(bg_logits, list):
-            logits = []
-            for c, b in zip(cls_logits, bg_logits):
-                logits.append(torch.cat([c, b], dim=1) / self.cls_temp)
+        if bg_logits:
+            if isinstance(bg_logits, list):
+                logits = []
+                for c, b in zip(cls_logits, bg_logits):
+                    logits.append(torch.cat([c, b], dim=1) / self.cls_temp)
+            else:
+                # N x (classes + 1)
+                logits = torch.cat([cls_logits, bg_logits], dim=1) / self.cls_temp
         else:
-            # N x (classes + 1)
-            logits = torch.cat([cls_logits, bg_logits], dim=1)
-            logits = logits / self.cls_temp
+            logits = cls_logits
 
         # loss
         class_labels = class_labels.long().to(device)
@@ -354,11 +377,6 @@ class DeVit(nn.Module):
         else:
             loss = self.focal_loss(logits, class_labels, num_classes=num_active_classes, bg_weight=self.bg_cls_weight)
             loss_dict['focal_loss'] = loss
-
-        import IPython, sys
-
-        IPython.embed(header='forward')
-        sys.exit()
 
     @torch.no_grad()
     def forward_once(self, images: List[_Image]) -> Dict[str, Any]:
@@ -390,7 +408,7 @@ class DeVit(nn.Module):
         emb = torch.stack((sin_x[:, :, 0::2].sin(), sin_x[:, :, 1::2].cos()), dim=3).flatten(2)
         return emb  # [bs, n_dist, n_emb]
 
-    def focal_loss(self, inputs, targets, gamma=0.5, reduction="mean", bg_weight=0.2, num_classes=None):
+    def focal_loss(self, inputs, targets, gamma=0.5, reduction='mean', bg_weight=0.0, num_classes=None):
         """Inspired by RetinaNet implementation"""
         if targets.numel() == 0 and reduction == "mean":
             return input.sum() * 0.0  # connect the gradient
@@ -425,6 +443,7 @@ def read_text_file(filename: str) -> List[str]:
 def devit(
     sam_args: Dict[str, str],
     mask_gen_args: Dict[str, Any] = {},
+    roi_pool_size: int = 16,
     prototype_file: str = None,
     background_prototype_file: str = None,
     all_classes_fn: str = None,
@@ -436,35 +455,40 @@ def devit(
     mask_generator = build_sam_auto_mask_generator(sam_args, mask_gen_args)
     proposal_matcher = Matcher([0.3, 0.7], [0, -1, 1])
 
-    devit = DeVit(mask_generator, proposal_matcher=proposal_matcher)
-
     if all_classes_fn and seen_classes_fn and prototype_file:
         prototypes = ProtoTypes.load(prototype_file)
         all_cids = read_text_file(all_classes_fn)
         seen_cids = read_text_file(seen_classes_fn)
-        devit.setup_prototypes(prototypes, all_cids, seen_cids, is_bg=False)
+        # devit.setup_prototypes(prototypes, all_cids, seen_cids, is_bg=False)
+    else:
+        prototypes, all_cids, seen_cids = None, None, None
 
     if background_prototype_file:
         background_prototypes = ProtoTypes.load(background_prototype_file)
-        devit.setup_prototypes(background_prototypes, is_bg=True)
+        # devit.setup_prototypes(background_prototypes, is_bg=True)
+    else:
+        background_prototypes = None
 
-    return devit
+    return DeVit(
+        mask_generator, proposal_matcher, roi_pool_size, prototypes, background_prototypes, all_cids, seen_cids
+    )
 
 
 if __name__ == '__main__':
     from torchvision.datapoints import BoundingBoxFormat
 
-    fn = '/root/krishneel/Downloads/fs_coco_trainval_novel_10shot.vitl14.pkl'
+    # fn = '/root/krishneel/Downloads/fs_coco_trainval_novel_10shot.vitl14.pkl'
+    fn = '/root/krishneel/Downloads/fsl/prototypes/fs_coco_trainval_novel_5shot.pkl'
     bg = '/root/krishneel/Downloads/background_prototypes.vitb14.pth'
     an = '../../data/coco/all_classes.txt'
     sn = '../../data/coco/seen_classes.txt'
 
     m = devit(
         {'model': 'vit_b', 'checkpoint': None},
-        # prototype_file=fn,
+        prototype_file=fn,
         # background_prototype_file=bg,
-        # all_classes_fn=an,
-        # seen_classes_fn=sn,
+        all_classes_fn=an,
+        seen_classes_fn=sn,
     )
     m.cuda()
 
@@ -477,9 +501,6 @@ if __name__ == '__main__':
     )
     targets = [{'gt_proposal': proposal}]
 
-    # m([im], targets=targets)
-    x = m.build_image_prototypes(im, proposal)
-    import IPython, sys
-
-    IPython.embed(header='forward')
-    sys.exit()
+    x = m([im], targets=targets)
+    # x = m.build_image_prototypes(im, proposal)
+    print(x)

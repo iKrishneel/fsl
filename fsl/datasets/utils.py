@@ -1,13 +1,11 @@
 #!/usr/bin/env python
 
-from typing import List, Union, Type
+from typing import List, Type, Union
 
 import numpy as np
 import torch
-
-from torchvision.transforms.v2 import functional
 from torchvision.datapoints import BoundingBoxFormat as BBFmt
-
+from torchvision.transforms.v2 import functional
 
 _Tensor = Type[torch.Tensor]
 

@@ -1,0 +1,73 @@
+driver: torch
+device: "cuda"
+
+workdir:
+  path: "/tmp/fsl/sam_vitb_coco2017/"
+  unique: False
+
+distributed:
+  backend: nccl
+  type: single  # single or multiple
+  nproc_per_node: 4
+  single:
+    init_method: tcp://127.0.0.1:23456
+
+models:
+  devit:
+    sam_args:
+      model: vit_b
+    all_classes_fn: "../../data/coco/all_classes.txt"
+    seen_classes_fn: "../../data/coco/seen_classes.txt"
+
+datasets:
+  dataloader:
+    batch_size: 1
+    num_workers: 0
+    shuffle: False
+    pin_memory: True
+    collate_fn: "collate_data"
+  coco:
+    train:
+      bucket_name: &bucket "sr-shokunin"
+      root: "perception/datasets/coco/train2017"
+      # anno_fn: "perception/datasets/coco/annotations/instances_val2017.json"
+      anno_fn: "/root/krishneel/Downloads/fs_coco17_base_train.json"
+
+transforms:
+  train:
+    engine: "torchvision.transforms"
+    ConvertFormatBoundingBox:
+      old_fmt: "XYWH"
+      new_fmt: "XYXY"
+    ResizeLongestSide:
+      size: 1024
+    PadToSize:
+      size: 1024
+
+solvers:
+  engine: "torch.optim"
+  snapshot: 5000
+
+  SGD:
+    lr: 0.001
+    momentum: 0.5
+  schedulers:
+    StepLR:
+      step_size: 10
+      gamma: 0.1
+
+io:
+  checkpoint:
+    engine: 's3_writer'
+    bucket_name: *bucket
+    root: "perception/models/fsl/sam_vitb_coco17_5shot/"
+
+build:
+  devit:
+    dataset: "coco"
+    train:
+      solver: "SGD"
+      scheduler: "StepLR"
+      epochs: 100
+
+  model: "devit"

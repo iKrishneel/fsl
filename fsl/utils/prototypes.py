@@ -1,15 +1,13 @@
-#!/usr/bin/env python
-
-from typing import Type, List, Any, Dict, Union
-from dataclasses import dataclass
-
-from copy import deepcopy
 import os.path as osp
+import pickle
+from copy import deepcopy
+from dataclasses import dataclass
+from typing import Any, Dict, List, Type, Union
+
 import numpy as np
 import torch
 
 from fsl.structures import Instances
-
 
 _Tensor = Type[torch.Tensor]
 
@@ -46,7 +44,7 @@ class ProtoTypes(object):
         return ProtoTypes(self.embeddings.clone(), deepcopy(self.labels))
 
     def check(self, labels: List[str], insert_missing: bool = True) -> 'ProtoTypes':
-        pt = deepcopy(self)
+        pt = deepcopy(self.to('cpu'))
         for label in labels:
             if label in pt.labels or not insert_missing:
                 continue
@@ -58,6 +56,13 @@ class ProtoTypes(object):
         self.embeddings = self.embeddings.to(device)
         return self
 
+    def save(self, filename: str) -> None:
+        import os
+
+        os.makedirs(osp.dirname(filename), exist_ok=True)
+        with open(filename, 'wb') as pfile:
+            pickle.dump(self.to('cpu'), pfile)
+
     @property
     def normalized_embedding(self) -> _Tensor:
         embeddings = self.embeddings.mean(dim=1) if len(self.embeddings.shape) == 3 else self.embeddings
@@ -65,14 +70,22 @@ class ProtoTypes(object):
 
     @classmethod
     def load(
-        cls, filenames: Union[List[str], str], keys: List[str] = ['prototypes', 'label_names']
+        cls, filenames: Union[List[str], str], keys: List[str] = ['embeddings', 'labels']
     ) -> Union[List['ProtoTypes'], 'ProtoTypes']:
         is_list = isinstance(filenames, list)
         filenames = [filenames] if not is_list else filenames
         prototypes = []
         for filename in filenames:
             assert osp.isfile(filename)
-            data = torch.load(filename)
+
+            if 'pkl' in filename:
+                with open(filename, 'rb') as pfile:
+                    pt = pickle.load(pfile)
+                    assert isinstance(pt, ProtoTypes)
+                    prototypes.append(pt)
+                continue
+            else:
+                data = torch.load(filename)
             if isinstance(data, torch.Tensor):
                 data = data.flatten(0, 1) if len(data.shape) == 3 else data
                 args = [data, [-1] * data.shape[0]]

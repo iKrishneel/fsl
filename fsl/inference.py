@@ -1,16 +1,15 @@
 #!/usr/bin/env python
 
-from typing import Union, Type, Tuple, List
-import os.path as osp
-
 import json
-import torch
-import numpy as np
-from PIL import Image
+import os.path as osp
+from typing import List, Tuple, Type, Union
 
+import numpy as np
+import torch
+from igniter.engine import InferenceEngine as _InferenceEngine
 from igniter.logger import logger
 from igniter.registry import engine_registry
-from igniter.engine import InferenceEngine as _InferenceEngine
+from PIL import Image
 
 _Image = Type[Image.Image]
 
@@ -60,16 +59,16 @@ class InferenceEngine(_InferenceEngine):
 
 
 if __name__ == '__main__':
+    import logging
+
+    from igniter.builder import build_engine
+    from igniter.logger import logger
+    from omegaconf import OmegaConf
+    from PIL import Image
+
+    from fsl.datasets.s3_coco_dataset import *
     from fsl.model import *
     from fsl.transforms import *
-    from fsl.datasets.s3_coco_dataset import *
-    from igniter.builder import build_engine
-
-    from PIL import Image
-    from omegaconf import OmegaConf
-
-    import logging
-    from igniter.logger import logger
 
     logger.setLevel(logging.INFO)
 

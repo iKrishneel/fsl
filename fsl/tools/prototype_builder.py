@@ -1,16 +1,17 @@
 #!/usr/bin/env python
 
-from typing import Any, Type, List, Dict, Callable
 import os
-import torch
 import pickle
+from typing import Any, Callable, Dict, List, Type
 
+import torch
+from igniter.engine import EvaluationEngine
+from igniter.registry import engine_registry, event_registry, func_registry, io_registry
 from omegaconf import DictConfig
 from PIL import Image
 
-from igniter.registry import func_registry, engine_registry, io_registry
-from igniter.engine import EvaluationEngine
 from fsl.structures import Instances
+from fsl.utils import ProtoTypes
 
 _Image = Type[Image.Image]
 
@@ -22,8 +23,7 @@ def file_writer(io_cfg: Dict[str, str]) -> Callable:
 
     def write(prototypes, iid: str) -> None:
         path = os.path.join(root, f'{str(iid).zfill(12)}.pkl')
-        with open(path, 'wb') as pfile:
-            pickle.dump(prototypes, pfile)
+        prototypes.save(path)
 
     return write
 
@@ -35,11 +35,39 @@ def prototype_forward(engine, batch) -> None:
         instances = Instances(
             bboxes=instances['bboxes'],
             class_ids=instances['category_ids'],
-            labels=instances['category_ids'],
+            labels=instances['category_names'],
             image_id=image_ids,
         )
         prototypes = engine._model.build_image_prototypes(image, instances)
         engine.file_io(prototypes, image_ids[0])
+
+
+@event_registry
+def collate_and_write(filename: str) -> None:
+    root = engine._cfg.io.file_io.root
+
+    def _load_pickle(filename: str) -> ProtoTypes:
+        with open(filename, 'rb') as pfile:
+            data = pickle.load(pfile)
+        return data
+
+    p_files = sorted(os.listdir(root))
+    prototypes = None
+    for i, p_file in enumerate(p_files):
+        pt = _load_pickle(os.path.join(root, p_file))
+        prototypes = pt if i == 0 else prototypes + pt
+
+    average_embeddings = {}
+    for embedding, label in zip(prototypes.embeddings, prototypes.labels):
+        embedding = embedding[None] if len(embedding.shape) == 1 else embedding
+        emb = average_embeddings.get(label, [])
+        emb.append(embedding)
+        average_embeddings[label] = emb
+
+    ProtoTypes(
+        torch.stack([torch.cat(value).mean(dim=0) for key, value in average_embeddings.items()]),
+        list(average_embeddings.keys()),
+    ).save(os.path.join(root, filename))
 
 
 @engine_registry('prototype_engine')
@@ -54,10 +82,12 @@ class ProtoTypeEngine(EvaluationEngine):
 
 
 if __name__ == '__main__':
-    from omegaconf import OmegaConf
+    import logging
+
     from igniter.builder import build_engine
     from igniter.logger import logger
-    import logging
+    from omegaconf import OmegaConf
+
     from fsl.datasets.s3_coco_dataset import collate_data  # NOQA
     from fsl.models.devit import devit  # NOQA
 
@@ -66,7 +96,7 @@ if __name__ == '__main__':
     cfg = OmegaConf.load('../../configs/devit/prototypes.yaml')
 
     engine = build_engine(cfg, mode='val')
-    engine()
+    # engine()
+    import IPython
 
-    # image = Image.open('/root/krishneel/Downloads/000000.jpg')
-    # engine(image)
+    IPython.embed()

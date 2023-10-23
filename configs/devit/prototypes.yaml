@@ -46,5 +46,9 @@ build:
     val:
       func: "prototype_forward"
       transforms: "val"
+      event_handlers:
+        - collate_and_write:
+            event_type: COMPLETED
+            filename: "fs_coco_trainval_novel_5shot.pkl"
 
   model: "devit"
