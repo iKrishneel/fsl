@@ -11,8 +11,15 @@ from PIL import Image
 
 torchvision.disable_beta_transforms_warning()  # NOQA
 
-from torchvision.datapoints import BoundingBoxFormat
 from torchvision.transforms.v2 import functional as TF
+
+from fsl.utils import version
+
+if version.minor_version(torchvision.__version__) <= 15:
+    from torchvision.datapoints import BoundingBoxFormat
+else:
+    from torchvision.tv_tensors import BoundingBoxFormat
+
 
 _Tensor = torch.Tensor
 _Image = Image.Image
@@ -105,7 +112,9 @@ class ConvertFormatBoundingBox(nn.Module):
         self.old_fmt, self.new_fmt = [getattr(BoundingBoxFormat, fmt) for fmt in [old_fmt, new_fmt]]
 
     def forward(self, image: _Image, bboxes: List[_Tensor]) -> Tuple[_Image, List[_Tensor]]:
-        bboxes = [TF.convert_format_bounding_box(bbox, self.old_fmt, self.new_fmt) for bbox in bboxes]
+        convert_bounding_box_format = TF.convert_format_bounding_box \
+            if version.minor_version(torchvision.__version__) < 16 else TF.convert_bounding_box_format
+        bboxes = [convert_bounding_box_format(bbox, self.old_fmt, self.new_fmt) for bbox in bboxes]
         return image, bboxes
 
 

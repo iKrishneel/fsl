@@ -16,16 +16,17 @@ models:
   devit:
     sam_args:
       model: vit_b
-    all_classes_fn: "../../data/coco/all_classes.txt"
-    seen_classes_fn: "../../data/coco/seen_classes.txt"
+    all_classes_fn: "../data/coco/all_classes.txt"
+    seen_classes_fn: "../data/coco/seen_classes.txt"
+    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/fs_coco_trainval_novel_5shot.pkl"
 
 datasets:
   dataloader:
-    batch_size: 1
+    batch_size: 2
     num_workers: 0
     shuffle: False
     pin_memory: True
-    collate_fn: "collate_data"
+    collate_fn: "collate_data_instances"
   coco:
     train:
       bucket_name: &bucket "sr-shokunin"
@@ -68,6 +69,6 @@ build:
     train:
       solver: "SGD"
       scheduler: "StepLR"
-      epochs: 100
+      epochs: 10
 
   model: "devit"

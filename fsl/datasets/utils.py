@@ -4,8 +4,16 @@ from typing import List, Type, Union
 
 import numpy as np
 import torch
-from torchvision.datapoints import BoundingBoxFormat as BBFmt
+import torchvision
 from torchvision.transforms.v2 import functional
+
+from fsl.utils import version
+
+if version.minor_version(torchvision.__version__) <= 15:
+    from torchvision.datapoints import BoundingBoxFormat as BBFmt
+else:
+    from torchvision.tv_tensors import BoundingBoxFormat as BBFmt
+
 
 _Tensor = Type[torch.Tensor]
 

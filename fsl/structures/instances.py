@@ -10,8 +10,15 @@ import torchvision
 
 torchvision.disable_beta_transforms_warning()
 
-from torchvision.datapoints import BoundingBoxFormat
 from torchvision.transforms.v2 import functional
+
+from fsl.utils import version
+
+if version.minor_version(torchvision.__version__) <= 15:
+    from torchvision.datapoints import BoundingBoxFormat
+else:
+    from torchvision.tv_tensors import BoundingBoxFormat
+    
 
 Coord = Union[List[int], np.ndarray, torch.Tensor]
 Array = Union[np.ndarray, torch.Tensor]

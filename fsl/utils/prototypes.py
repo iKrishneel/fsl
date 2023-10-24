@@ -33,7 +33,7 @@ class ProtoTypes(object):
     def __add__(self, other: 'ProtoTypes') -> 'ProtoTypes':
         if not isinstance(other, ProtoTypes):
             raise TypeError(f'Invalid object type {other}, expects {type(self)}')
-        embeddings = torch.cat([self.embeddings, other.embeddings], dim=0)
+        embeddings = torch.cat([self.embeddings, other.embeddings.to(self.embeddings.device)], dim=0)
         labels = self.labels + other.labels
         return ProtoTypes(embeddings, labels)
 

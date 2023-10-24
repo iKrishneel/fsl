@@ -17,9 +17,15 @@ torchvision.disable_beta_transforms_warning()
 from igniter.datasets import S3CocoDataset, S3Dataset
 from igniter.logger import logger
 from igniter.registry import dataset_registry, func_registry
-from torchvision.datapoints import BoundingBoxFormat
 
-from fsl.structures import Proposal
+from fsl.structures import Instances
+from fsl.utils import version
+
+
+if version.minor_version(torchvision.__version__) <= 15:
+    from torchvision.datapoints import BoundingBoxFormat
+else:
+    from torchvision.tv_tensors import BoundingBoxFormat
 
 
 class S3CocoDatasetSam(S3CocoDataset):
@@ -98,6 +104,8 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
         # self.instances_per_batch = kwargs.get('instances_per_batch', 10)
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
+        label_name_mapping = {v['id']: v['name'] for v in self.coco.dataset['categories']}
+
         while True:
             try:
                 iid = self.ids[index]
@@ -108,11 +116,7 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
                 # FIXME: Add targets transform parsing directly from config
                 category_ids = [target['category_id'] for target in targets]
                 bboxes = [torch.Tensor(target['bbox']) for target in targets]
-                # for target in targets:
-                # if any(side < 20 for side in target['bbox'][2:]):
-                #     continue
-                # category_ids.append(self.label_mapping[target['category_id']])
-                # bboxes.append(torch.Tensor(self.xywh_to_xyxy(target['bbox'])))
+                category_names = [label_name_mapping[target['category_id']] for target in targets]
 
                 assert len(bboxes) > 0, 'Empty bounding boxes'
 
@@ -124,13 +128,13 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
                 logger.warning(f'{e} for iid: {iid} index: {index}')
                 index = np.random.choice(np.arange(len(self.ids)))
 
-        """
-        if self.instances_per_batch > 0:
-            indices = np.random.choice(len(bboxes), self.instances_per_batch, replace=True)
-            bboxes = [bboxes[index] for index in indices]
-            category_ids = [category_ids[index] for index in indices]
-        """
-        return {'image': image, 'bboxes': bboxes, 'category_ids': category_ids, 'image_ids': [iid]}
+        return {
+            'image': image,
+            'bboxes': bboxes,
+            'category_ids': category_ids,
+            'category_names': category_names,
+            'image_ids': [iid],
+        }
 
 
 @dataset_registry('fs_coco')
@@ -253,12 +257,27 @@ def load_json(filename: str) -> DictConfig:
     return OmegaConf.load(filename)
 
 
-@func_registry('collate_data')
+@func_registry
 def collate_data(batches: List[Dict[str, Any]]) -> List[Any]:
     images, targets = [], []
     for batch in batches:
         images.append(batch.pop('image'))
         targets.append(batch)
+    return images, targets
+
+
+@func_registry
+def collate_data_instances(batches: List[Dict[str, Any]]) -> List[Any]:
+    images, targets = [], []
+    for batch in batches:
+        images.append(batch.pop('image'))
+        instances = Instances(
+            bboxes=batch['bboxes'],
+            class_ids=batch['category_ids'],
+            labels=batch['category_names'],
+            bbox_fmt=BoundingBoxFormat.XYXY,
+        )
+        targets.append({'gt_proposal': instances})
     return images, targets
 
 

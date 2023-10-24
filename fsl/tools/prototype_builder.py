@@ -96,7 +96,4 @@ if __name__ == '__main__':
     cfg = OmegaConf.load('../../configs/devit/prototypes.yaml')
 
     engine = build_engine(cfg, mode='val')
-    # engine()
-    import IPython
-
-    IPython.embed()
+    engine()

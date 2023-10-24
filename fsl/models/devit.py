@@ -108,7 +108,7 @@ class DeVit(nn.Module):
         self.batch_size_per_image = 128
         self.pos_ratio = 0.25
         self.num_sample_class = 10
-        self.t_len = 128
+        self.t_len = 256
         self.temb = 128
         self.t_pos_emb = 128
         self.t_bg_emb = 128
@@ -160,16 +160,16 @@ class DeVit(nn.Module):
         num_classes = len(self.train_class_weight)
         device = self.mask_generator.predictor.device  # TODO
         assert targets is not None and len(targets) == len(images)
-
+        
         # proposals
         gt_instances = [target['gt_proposal'] for target in targets]
         gt_bboxes = [gt_proposal.to_tensor().bboxes for gt_proposal in gt_instances]
-        noisy_proposals = utils.prepare_noisy_boxes(gt_bboxes, im.size[::-1])
+        noisy_proposals = utils.prepare_noisy_boxes(gt_bboxes, images[0].size[::-1])
         boxes = [torch.cat([gt_bboxes[i], noisy_proposals[i]]).to(device) for i in range(len(targets))]
 
         # embedding of the images
         features = self.mask_generator(images)
-
+        
         class_labels, matched_gt_boxes, resampled_proposals = [], [], []
         num_bg_samples, num_fg_samples, gt_masks = [], [], []
         for i, (proposals_per_image, targets_per_image) in enumerate(zip(boxes, gt_instances)):
@@ -179,6 +179,7 @@ class DeVit(nn.Module):
             matched_idxs, matched_labels = self.proposal_matcher(match_quality_matrix)
 
             class_labels_i = targets_per_image.class_ids[matched_idxs]
+            
             if len(class_labels_i) == 0:
                 # no annotation on this image
                 assert torch.all(matched_labels == 0)
@@ -222,14 +223,12 @@ class DeVit(nn.Module):
 
         class_labels = torch.cat(class_labels)
         matched_gt_boxes = torch.cat(matched_gt_boxes)
-
-        # import IPython, sys; IPython.embed(header='forward'); sys.exit()
-
+        
         rois = []
         for bid, box in enumerate(resampled_proposals):
             batch_index = torch.full((len(box), 1), fill_value=float(bid)).to(device)
             rois.append(torch.cat([batch_index, box.to(device)], dim=1))
-            rois = torch.cat(rois)
+        rois = torch.cat(rois)
 
         roi_features = self.roi_pool(features, rois)  # N, C, k, k
         roi_bs = len(roi_features)
@@ -244,7 +243,7 @@ class DeVit(nn.Module):
 
         # sample topk classes
         class_topk = self.num_sample_class
-        class_indices = None
+        class_indices = None        
 
         if class_topk < 0:
             class_topk = num_classes
@@ -293,7 +292,7 @@ class DeVit(nn.Module):
         other_classes = other_classes.flatten(0, 1)  # (Nxclasses) x spatial x classes-1
         other_classes, _ = torch.sort(other_classes, dim=-1)
         other_classes = self.interpolate(other_classes, self.t_len, mode='linear')  # (Nxclasses) x spatial x T
-        other_classes = self.fc_other_class(other_classes)  # (Nxclasses) x spatial x emb
+        other_classes = self.fc_other_class(other_classes)  # (Nxclasses) x spatial x emb        
         other_classes = other_classes.permute(0, 2, 1)  # (Nxclasses) x emb x spatial
         # (Nxclasses) x emb x S x S
         roi_pool_size = [self.roi_pool.output_size] * 2
@@ -307,7 +306,7 @@ class DeVit(nn.Module):
         intra_dist_emb = self.distance_embed(intra_feats.flatten(0, 1), num_pos_feats=self.t_pos_emb)
         intra_dist_emb = self.fc_intra_class(intra_dist_emb)
         intra_dist_emb = intra_dist_emb.reshape(bs, spatial_size, num_active_classes, -1)
-
+        
         # (Nxclasses) x emb x S x S
         intra_dist_emb = (
             intra_dist_emb.permute(0, 2, 3, 1)
@@ -342,6 +341,7 @@ class DeVit(nn.Module):
 
         # (Nxclasses) x 1
         cls_logits = self.per_cls_cnn(per_cls_input)
+        print(">>>> ", per_cls_input.shape, cls_logits[0].shape)
 
         # N x classes
         if isinstance(cls_logits, list):
@@ -359,24 +359,28 @@ class DeVit(nn.Module):
                 logits = torch.cat([cls_logits, bg_logits], dim=1) / self.cls_temp
         else:
             logits = cls_logits
-
+            
         # loss
         class_labels = class_labels.long().to(device)
         if sample_class_enabled:
+            
             bg_indices = class_labels == num_classes
             fg_indices = class_labels != num_classes
 
             class_labels[fg_indices] = (class_indices == class_labels.view(-1, 1)).nonzero()[:, 1]
             class_labels[bg_indices] = num_active_classes
-
+            
         loss_dict = {}
         if isinstance(logits, list):
-            for i, l in enumerate(logits):
-                loss = self.focal_loss(l, class_labels, num_classes=num_active_classes, bg_weight=self.bg_cls_weight)
-                loss_dict[f'focal_loss_{i}'] = loss
+            for i, logit in enumerate(logits):
+                loss_dict[f'focal_loss_{i}'] = self.focal_loss(
+                    logit, class_labels, num_classes=num_active_classes, bg_weight=self.bg_cls_weight
+                )
         else:
             loss = self.focal_loss(logits, class_labels, num_classes=num_active_classes, bg_weight=self.bg_cls_weight)
             loss_dict['focal_loss'] = loss
+
+        # import IPython, sys; IPython.embed(header="Forward"); sys.exit()
 
     @torch.no_grad()
     def forward_once(self, images: List[_Image]) -> Dict[str, Any]:
@@ -412,7 +416,7 @@ class DeVit(nn.Module):
         """Inspired by RetinaNet implementation"""
         if targets.numel() == 0 and reduction == "mean":
             return input.sum() * 0.0  # connect the gradient
-
+    
         # focal scaling
         ce_loss = nn.functional.cross_entropy(inputs, targets, reduction="none")
         p = nn.functional.softmax(inputs, dim=-1)
