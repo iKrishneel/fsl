@@ -152,9 +152,9 @@ class DeVit(nn.Module):
             self.register_buffer('train_class_weight', pt.normalized_embedding[torch.as_tensor(train_class_order)])
             self.register_buffer('test_class_weight', pt.normalized_embedding[torch.as_tensor(test_class_order)])
 
-    def forward(self, images: Union[List[_Image], _Tensor], targets: Dict[str, Any] = None) -> Dict[str, Any]:
-        if not self.training:
-            return self.forward_once(images)
+    def forward(self, images: List[_Tensor], targets: List[Dict[str, Any]] = None) -> Dict[str, Any]:
+        if not self.training or True:
+            return self.forward_once(images, targets)
 
         num_classes = len(self.train_class_weight)
         assert targets is not None and len(targets) == len(images)
@@ -239,7 +239,6 @@ class DeVit(nn.Module):
 
         class_weight = self.train_class_weight
         # (N x spatial x emb) @ (emb x class) = N x spatial x class
-        feats = roi_features.transpose(-2, -1) @ class_weight.T
 
         # sample topk classes
         class_topk = self.num_sample_class
@@ -270,6 +269,123 @@ class DeVit(nn.Module):
             class_indices = torch.sort(class_indices, dim=1).values
         else:
             num_active_classes = num_classes
+
+        logits = self.get_logits(
+            class_weight, roi_features, class_indices, class_topk, sample_class_enabled, num_classes, num_active_classes
+        )
+
+        # loss
+        class_labels = class_labels.long().to(self.device)
+        if sample_class_enabled:
+            bg_indices = class_labels == num_classes
+            fg_indices = class_labels != num_classes
+
+            class_labels[fg_indices] = (class_indices == class_labels.view(-1, 1)).nonzero()[:, 1]
+            class_labels[bg_indices] = num_active_classes
+
+        if not bg_logits:
+            indices = torch.where(class_labels != num_active_classes)
+            class_labels = class_labels[indices]
+            logits = [logit[indices] for logit in logits]
+
+        loss_dict = {}
+        if isinstance(logits, list):
+            for i, logit in enumerate(logits):
+                loss_dict[f'focal_loss_{i}'] = self.focal_loss(
+                    logit, class_labels, num_classes=num_active_classes, bg_weight=self.bg_cls_weight
+                )
+        else:
+            loss = self.focal_loss(logits, class_labels, num_classes=num_active_classes, bg_weight=self.bg_cls_weight)
+            loss_dict['focal_loss'] = loss
+
+        # import IPython, sys; IPython.embed(header="Forward"); sys.exit()
+        return loss_dict
+
+    @torch.no_grad()
+    def forward_once(self, images: List[_Tensor], targets: List[Dict[str, Any]] = None) -> Dict[str, Any]:
+        if targets and 'gt_proposal' in targets[0]:
+            proposals = [target['gt_proposal'] for target in targets]
+        else:
+            proposals = self.get_proposals(images)
+
+        assert len(proposals) == 1
+
+        class_weights = self.test_class_weight
+        num_classes = len(self.test_class_weight)
+
+        bboxes = torch.cat([proposal.to_tensor().bboxes.to(self.device) for proposal in proposals])
+        rois = torch.cat([torch.full((len(bboxes), 1), fill_value=0).to(self.device), bboxes], dim=1)
+
+        images = torch.stack(images).to(self.device)
+        features = self.mask_generator(images)
+
+        roi_features = self.roi_pool(features, rois)  # N, C, k, k
+        roi_bs = len(roi_features)
+
+        roi_features = roi_features.flatten(2)
+        bs, spatial_size = roi_features.shape[0], roi_features.shape[-1]
+        # (N x spatial x emb) @ (emb x class) = N x spatial x class
+        feats = roi_features.transpose(-2, -1) @ class_weights.T
+
+        # sample topk classes
+        class_topk = self.num_sample_class
+        class_indices = None
+        if class_topk < 0:
+            class_topk = num_classes
+            sample_class_enabled = False
+        else:
+            class_topk = num_classes if class_topk == 0 else class_topk
+            sample_class_enabled = True
+
+        if sample_class_enabled:
+            num_active_classes = class_topk
+            init_scores = nn.functional.normalize(roi_features.flatten(2).mean(2), dim=1) @ class_weights.T
+            topk_class_indices = torch.topk(init_scores, class_topk, dim=1).indices
+            class_indices = torch.sort(topk_class_indices, dim=1).values
+        else:
+            num_active_classes = num_classes
+
+        logits = self.get_logits(
+            class_weights,
+            roi_features,
+            class_indices,
+            class_topk,
+            sample_class_enabled,
+            num_classes,
+            num_active_classes,
+        )
+
+        scores = nn.functional.softmax(torch.stack(logits), dim=-1)
+        output = {'scores': scores[:, :-1]}
+
+        """
+        if sample_class_enabled:
+            full_scores = torch.zeros(len(scores), num_classes + 1, device=self.device)
+            full_scores.scatter_(1, class_indices, scores)
+            full_scores[:, -1] = scores[:, -1]
+            output['scores'] = full_scores[:, :-1]
+        """
+        import sys
+
+        import IPython
+
+        IPython.embed(header="Forward Once")
+        sys.exit()
+
+        return output
+
+    def get_logits(
+        self,
+        class_weight,
+        roi_features,
+        class_indices,
+        class_topk,
+        sample_class_enabled,
+        num_classes,
+        num_active_classes,
+    ):
+        feats = roi_features.transpose(-2, -1) @ class_weight.T
+        bs, spatial_size = roi_features.shape[0], roi_features.shape[-1]
 
         other_classes = []
         if sample_class_enabled:
@@ -318,7 +434,6 @@ class DeVit(nn.Module):
         # feats: N x spatial x class
         cls_dist_feats = self.interpolate(torch.sort(feats, dim=2).values, self.t_len, mode='linear')  # N x spatial x T
 
-        # TODO: REMOVE THE ROI SIZE
         if self.bg_tokens is not None and self.fc_back_class is not None:
             # N x spatial x back
             bg_feats = roi_features.transpose(-2, -1) @ self.bg_tokens.T
@@ -356,42 +471,9 @@ class DeVit(nn.Module):
                 # N x (classes + 1)
                 logits = torch.cat([cls_logits, bg_logits], dim=1) / self.cls_temp
         else:
-            logits = cls_logits
+            logits = cls_logits / self.cls_temp
 
-        # loss
-        class_labels = class_labels.long().to(self.device)
-        if sample_class_enabled:
-            bg_indices = class_labels == num_classes
-            fg_indices = class_labels != num_classes
-
-            class_labels[fg_indices] = (class_indices == class_labels.view(-1, 1)).nonzero()[:, 1]
-            class_labels[bg_indices] = num_active_classes
-
-        if not bg_logits:
-            indices = torch.where(class_labels != num_active_classes)
-            class_labels = class_labels[indices]
-            logits = [logit[indices] for logit in logits]
-
-        loss_dict = {}
-        if isinstance(logits, list):
-            for i, logit in enumerate(logits):
-                loss_dict[f'focal_loss_{i}'] = self.focal_loss(
-                    logit, class_labels, num_classes=num_active_classes, bg_weight=self.bg_cls_weight
-                )
-        else:
-            loss = self.focal_loss(logits, class_labels, num_classes=num_active_classes, bg_weight=self.bg_cls_weight)
-            loss_dict['focal_loss'] = loss
-
-        import IPython, sys
-
-        IPython.embed(header="Forward")
-        sys.exit()
-        return loss_dict
-
-    @torch.no_grad()
-    def forward_once(self, images: List[_Image]) -> Dict[str, Any]:
-        proposals = self.get_proposals(images)
-        return {'features': self.mask_generator.predictor.features, 'proposals': proposals}
+        return logits
 
     @torch.no_grad()
     def build_image_prototypes(self, image: _Image, instances: Instances) -> ProtoTypes:

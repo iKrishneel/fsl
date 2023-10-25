@@ -77,5 +77,7 @@ build:
       solver: "SGD"
       scheduler: "StepLR"
       epochs: 10
+    inference:
+      engine: "inference"
 
   model: "devit_dinov2"
