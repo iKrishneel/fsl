@@ -37,6 +37,7 @@ class PropagateNet(nn.Module):
         self.mask_layers = nn.ModuleList()
         self.dropout = nn.Dropout(p=dropout)
         self.num_layers = num_layers
+
         for i in range(num_layers):
             channels = input_dim if i == 0 else hidden_dim
             self.main_layers.append(
@@ -61,13 +62,7 @@ class PropagateNet(nn.Module):
         outputs = []
         for i in range(self.num_layers):
             if len(masks) > 0:
-                embedding = torch.cat(
-                    [
-                        embedding,
-                    ]
-                    + masks,
-                    dim=1,
-                )
+                embedding = torch.cat([embedding] + masks, dim=1)
             embedding = self.main_layers[i](embedding)
 
             mask_logits = self.mask_layers[i](embedding) / self.mask_temperature
