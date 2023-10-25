@@ -2,7 +2,7 @@ driver: torch
 device: "cuda"
 
 models:
-  devit:
+  devit_sam:
     sam_args:
       model: "vit_b"
 
@@ -41,7 +41,7 @@ io:
     root: "/root/krishneel/Downloads/fsl/prototypes/"
 
 build:
-  devit:
+  devit_sam:
     dataset: "fs_coco"
     val:
       func: "prototype_forward"
@@ -51,4 +51,4 @@ build:
             event_type: COMPLETED
             filename: "fs_coco_trainval_novel_5shot.pkl"
 
-  model: "devit"
+  model: "devit_sam"

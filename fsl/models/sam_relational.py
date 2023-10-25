@@ -124,37 +124,6 @@ class SamPredictor(nn.Module, _SamPredictor):
         self.model.image_encoder.to(self.device)
         return self.model.image_encoder(input_images_torch)
 
-    """
-    def to(self, device):
-        self.model.to(device)
-
-    def children(self) -> Iterator[_Module]:
-        for name, module in self.model.named_children():
-            yield module
-
-    def modules(self) -> Iterator[_Module]:
-        for _, module in self.model.named_modules():
-            yield module
-
-    def buffers(self, *args, **kwargs):
-        return self.model.buffers(*args, **kwargs)
-
-    def parameters(self, *args, **kwargs):
-        return self.model.parameters(*args, **kwargs)
-
-    def named_modules(self, *args, **kwargs):
-        return self.model.named_modules(*args, **kwargs)
-
-    def named_buffers(self, *args, **kwargs):
-        return self.model.named_buffers(*args, **kwargs)
-
-    def state_dict(self, *args, **kwargs):
-        return self.model.state_dict(*args, **kwargs)
-
-    def named_parameters(self, *args, **kwargs):
-        return self.model.named_parameters(*args, **kwargs)
-    """
-
     @property
     def img_size(self) -> List[int]:
         return [self.model.image_encoder.img_size] * 2
@@ -195,6 +164,14 @@ class SamAutomaticMaskGenerator(nn.Module, _SAMG):
             for mask in masks
         ]
         return proposals
+
+    @property
+    def downsize(self) -> int:
+        return self.predictor.downsize
+
+    @property
+    def device(self) -> torch.device:
+        return self.predictor.device
 
 
 class SamRelationNetwork(nn.Module):

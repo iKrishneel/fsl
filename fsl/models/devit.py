@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Tuple, Type
+from typing import Any, Dict, List, Tuple, Type, Union
 
 import numpy as np
 import torch
@@ -102,18 +102,19 @@ class DeVit(nn.Module):
         super(DeVit, self).__init__()
         self.mask_generator = mask_generator
         self.proposal_matcher = proposal_matcher
-        self.roi_pool = RoIAlign(roi_pool_size, spatial_scale=1 / mask_generator.predictor.downsize, sampling_ratio=-1)
+        self.roi_pool = RoIAlign(roi_pool_size, spatial_scale=1 / mask_generator.downsize, sampling_ratio=-1)
 
         # TODO: Configure this
         self.batch_size_per_image = 128
         self.pos_ratio = 0.25
         self.num_sample_class = 10
-        self.t_len = 256
+        self.t_len = 128  # 256
         self.temb = 128
         self.t_pos_emb = 128
         self.t_bg_emb = 128
         self.cls_temp = 0.1
         self.hidden_dim = 256
+        self.num_cls_layers = 3
 
         cls_input_dim = self.temb * 2
 
@@ -131,9 +132,7 @@ class DeVit(nn.Module):
 
         self.fc_other_class = nn.Linear(self.t_len, self.temb)
         self.fc_intra_class = nn.Linear(self.t_pos_emb, self.temb)
-
-        num_cls_layers = 3
-        self.per_cls_cnn = PropagateNet(cls_input_dim, self.hidden_dim, num_layers=num_cls_layers)
+        self.per_cls_cnn = PropagateNet(cls_input_dim, self.hidden_dim, num_layers=self.num_cls_layers)
 
     def _setup_prototypes(
         self, prototypes: ProtoTypes, all_cids: List[str] = None, seen_cids: List[str] = None, is_bg: bool = False
@@ -143,7 +142,7 @@ class DeVit(nn.Module):
             self.fc_bg_class = nn.Linear(self.t_len, self.temb)
             self.fc_back_class = nn.Linear(len(self.bg_tokens), self.t_bg_emb)
             bg_input_dim = self.temb + self.t_bg_emb
-            self.bg_cnn = PropagateNet(bg_input_dim, self.hidden_dim, num_layers=num_cls_layers)
+            self.bg_cnn = PropagateNet(bg_input_dim, self.hidden_dim, num_layers=self.num_cls_layers)
         else:
             pt = prototypes.check(all_cids)
             train_class_order = [pt.labels.index(c) for c in seen_cids]
@@ -153,33 +152,34 @@ class DeVit(nn.Module):
             self.register_buffer('train_class_weight', pt.normalized_embedding[torch.as_tensor(train_class_order)])
             self.register_buffer('test_class_weight', pt.normalized_embedding[torch.as_tensor(test_class_order)])
 
-    def forward(self, images: List[_Image], targets: Dict[str, Any] = None):
+    def forward(self, images: Union[List[_Image], _Tensor], targets: Dict[str, Any] = None) -> Dict[str, Any]:
         if not self.training:
             return self.forward_once(images)
 
         num_classes = len(self.train_class_weight)
-        device = self.mask_generator.predictor.device  # TODO
         assert targets is not None and len(targets) == len(images)
-        
+
         # proposals
+        img_hw = images[0].shape[1:] if isinstance(images[0], torch.Tensor) else images[0].size[::-1]
         gt_instances = [target['gt_proposal'] for target in targets]
         gt_bboxes = [gt_proposal.to_tensor().bboxes for gt_proposal in gt_instances]
-        noisy_proposals = utils.prepare_noisy_boxes(gt_bboxes, images[0].size[::-1])
-        boxes = [torch.cat([gt_bboxes[i], noisy_proposals[i]]).to(device) for i in range(len(targets))]
+        noisy_proposals = utils.prepare_noisy_boxes(gt_bboxes, img_hw)
+        boxes = [torch.cat([gt_bboxes[i], noisy_proposals[i]]).to(self.device) for i in range(len(targets))]
 
         # embedding of the images
+        images = torch.stack(images).to(self.device) if isinstance(images[0], torch.Tensor) else images
         features = self.mask_generator(images)
-        
+
         class_labels, matched_gt_boxes, resampled_proposals = [], [], []
         num_bg_samples, num_fg_samples, gt_masks = [], [], []
         for i, (proposals_per_image, targets_per_image) in enumerate(zip(boxes, gt_instances)):
-            targets_per_image = targets_per_image.to_tensor(device)
+            targets_per_image = targets_per_image.to_tensor(self.device)
 
             match_quality_matrix = box_iou(targets_per_image.bboxes, proposals_per_image)
             matched_idxs, matched_labels = self.proposal_matcher(match_quality_matrix)
 
             class_labels_i = targets_per_image.class_ids[matched_idxs]
-            
+
             if len(class_labels_i) == 0:
                 # no annotation on this image
                 assert torch.all(matched_labels == 0)
@@ -208,26 +208,26 @@ class DeVit(nn.Module):
             proposals_per_image = proposals_per_image[sampled_idxs]
             class_labels_i = class_labels_i[sampled_idxs]
 
-            gt_boxes_i = (
-                targets_per_image.bboxes[matched_idxs[sampled_idxs]]
-                if len(targets_per_image.bboxes) > 0
-                else torch.zeros(len(sampled_idxs), 4, device=device)
-            )  # not used anyway
+            # gt_boxes_i = (
+            #     targets_per_image.bboxes[matched_idxs[sampled_idxs]]
+            #     if len(targets_per_image.bboxes) > 0
+            #     else torch.zeros(len(sampled_idxs), 4, device=device)
+            # )  # not used anyway
 
             resampled_proposals.append(proposals_per_image)
             class_labels.append(class_labels_i)
-            matched_gt_boxes.append(gt_boxes_i)
+            # matched_gt_boxes.append(gt_boxes_i)
 
             num_bg_samples.append((class_labels_i == num_classes).sum().item())
             num_fg_samples.append(class_labels_i.numel() - num_bg_samples[-1])
 
         class_labels = torch.cat(class_labels)
-        matched_gt_boxes = torch.cat(matched_gt_boxes)
-        
+        # matched_gt_boxes = torch.cat(matched_gt_boxes)
+
         rois = []
         for bid, box in enumerate(resampled_proposals):
-            batch_index = torch.full((len(box), 1), fill_value=float(bid)).to(device)
-            rois.append(torch.cat([batch_index, box.to(device)], dim=1))
+            batch_index = torch.full((len(box), 1), fill_value=float(bid)).to(self.device)
+            rois.append(torch.cat([batch_index, box.to(self.device)], dim=1))
         rois = torch.cat(rois)
 
         roi_features = self.roi_pool(features, rois)  # N, C, k, k
@@ -237,13 +237,13 @@ class DeVit(nn.Module):
         roi_features = roi_features.flatten(2)
         bs, spatial_size = roi_features.shape[0], roi_features.shape[-1]
 
-        class_weight = self.train_class_weight[:, : roi_features.shape[-1]]
+        class_weight = self.train_class_weight
         # (N x spatial x emb) @ (emb x class) = N x spatial x class
         feats = roi_features.transpose(-2, -1) @ class_weight.T
 
         # sample topk classes
         class_topk = self.num_sample_class
-        class_indices = None        
+        class_indices = None
 
         if class_topk < 0:
             class_topk = num_classes
@@ -266,14 +266,14 @@ class DeVit(nn.Module):
                 else:
                     curr_indices = torch.cat([torch.as_tensor([curr_label]), topk_class_indices_i[:-1]])
                 class_indices.append(curr_indices)
-            class_indices = torch.stack(class_indices).to(device)
+            class_indices = torch.stack(class_indices).to(self.device)
             class_indices = torch.sort(class_indices, dim=1).values
         else:
             num_active_classes = num_classes
 
         other_classes = []
         if sample_class_enabled:
-            indexes = torch.arange(0, num_classes, device=device)[None, None, :].repeat(bs, spatial_size, 1)
+            indexes = torch.arange(0, num_classes, device=self.device)[None, None, :].repeat(bs, spatial_size, 1)
             for i in range(class_topk):
                 cmask = indexes != class_indices[:, i].view(-1, 1, 1)
                 _ = torch.gather(
@@ -282,7 +282,7 @@ class DeVit(nn.Module):
                 other_classes.append(_[:, :, None, :])
         else:
             for c in range(num_classes):  # TODO: change to classes sampling during training for LVIS type datasets
-                cmask = torch.ones(num_classes, device=device, dtype=torch.bool)
+                cmask = torch.ones(num_classes, device=self.device, dtype=torch.bool)
                 cmask[c] = False
                 _ = feats[:, :, cmask]  # # N x spatial x classes-1
                 other_classes.append(_[:, :, None, :])
@@ -292,7 +292,7 @@ class DeVit(nn.Module):
         other_classes = other_classes.flatten(0, 1)  # (Nxclasses) x spatial x classes-1
         other_classes, _ = torch.sort(other_classes, dim=-1)
         other_classes = self.interpolate(other_classes, self.t_len, mode='linear')  # (Nxclasses) x spatial x T
-        other_classes = self.fc_other_class(other_classes)  # (Nxclasses) x spatial x emb        
+        other_classes = self.fc_other_class(other_classes)  # (Nxclasses) x spatial x emb
         other_classes = other_classes.permute(0, 2, 1)  # (Nxclasses) x emb x spatial
         # (Nxclasses) x emb x S x S
         roi_pool_size = [self.roi_pool.output_size] * 2
@@ -306,7 +306,7 @@ class DeVit(nn.Module):
         intra_dist_emb = self.distance_embed(intra_feats.flatten(0, 1), num_pos_feats=self.t_pos_emb)
         intra_dist_emb = self.fc_intra_class(intra_dist_emb)
         intra_dist_emb = intra_dist_emb.reshape(bs, spatial_size, num_active_classes, -1)
-        
+
         # (Nxclasses) x emb x S x S
         intra_dist_emb = (
             intra_dist_emb.permute(0, 2, 3, 1)
@@ -321,7 +321,7 @@ class DeVit(nn.Module):
         # TODO: REMOVE THE ROI SIZE
         if self.bg_tokens is not None and self.fc_back_class is not None:
             # N x spatial x back
-            bg_feats = roi_features.transpose(-2, -1) @ self.bg_tokens[:, : roi_features.shape[-1]].T
+            bg_feats = roi_features.transpose(-2, -1) @ self.bg_tokens.T
             bg_dist_emb = self.fc_back_class(bg_feats)  # N x spatial x emb
             bg_dist_emb = bg_dist_emb.permute(0, 2, 1).reshape(bs, -1, *roi_pool_size)
             # N x emb x S x S
@@ -329,8 +329,7 @@ class DeVit(nn.Module):
             # (Nxclasses) x emb x S x S
 
             # (Nxclasses) x EMB x S x S
-            # per_cls_input = torch.cat([intra_dist_emb, inter_dist_emb, bg_dist_emb_c], dim=1)
-            per_cls_input = torch.cat([per_cls_input, bg_dist_emb_c], dim=1)
+            per_cls_input = torch.cat([intra_dist_emb, inter_dist_emb, bg_dist_emb_c], dim=1)
 
             bg_cls_dist_emb = self.fc_bg_class(cls_dist_feats)  # N x spatial x emb
             bg_cls_dist_emb = bg_cls_dist_emb.permute(0, 2, 1).reshape(bs, -1, *roi_pool_size)
@@ -341,7 +340,6 @@ class DeVit(nn.Module):
 
         # (Nxclasses) x 1
         cls_logits = self.per_cls_cnn(per_cls_input)
-        print(">>>> ", per_cls_input.shape, cls_logits[0].shape)
 
         # N x classes
         if isinstance(cls_logits, list):
@@ -359,17 +357,21 @@ class DeVit(nn.Module):
                 logits = torch.cat([cls_logits, bg_logits], dim=1) / self.cls_temp
         else:
             logits = cls_logits
-            
+
         # loss
-        class_labels = class_labels.long().to(device)
+        class_labels = class_labels.long().to(self.device)
         if sample_class_enabled:
-            
             bg_indices = class_labels == num_classes
             fg_indices = class_labels != num_classes
 
             class_labels[fg_indices] = (class_indices == class_labels.view(-1, 1)).nonzero()[:, 1]
             class_labels[bg_indices] = num_active_classes
-            
+
+        if not bg_logits:
+            indices = torch.where(class_labels != num_active_classes)
+            class_labels = class_labels[indices]
+            logits = [logit[indices] for logit in logits]
+
         loss_dict = {}
         if isinstance(logits, list):
             for i, logit in enumerate(logits):
@@ -380,7 +382,11 @@ class DeVit(nn.Module):
             loss = self.focal_loss(logits, class_labels, num_classes=num_active_classes, bg_weight=self.bg_cls_weight)
             loss_dict['focal_loss'] = loss
 
-        # import IPython, sys; IPython.embed(header="Forward"); sys.exit()
+        import IPython, sys
+
+        IPython.embed(header="Forward")
+        sys.exit()
+        return loss_dict
 
     @torch.no_grad()
     def forward_once(self, images: List[_Image]) -> Dict[str, Any]:
@@ -416,7 +422,7 @@ class DeVit(nn.Module):
         """Inspired by RetinaNet implementation"""
         if targets.numel() == 0 and reduction == "mean":
             return input.sum() * 0.0  # connect the gradient
-    
+
         # focal scaling
         ce_loss = nn.functional.cross_entropy(inputs, targets, reduction="none")
         p = nn.functional.softmax(inputs, dim=-1)
@@ -436,6 +442,10 @@ class DeVit(nn.Module):
 
         return loss
 
+    @property
+    def device(self) -> torch.device:
+        return self.fc_other_class.weight.device
+
 
 def read_text_file(filename: str) -> List[str]:
     with open(filename, 'r') as txt_file:
@@ -443,8 +453,31 @@ def read_text_file(filename: str) -> List[str]:
     return [line.strip('\n') for line in lines]
 
 
+def build_devit(
+    generator: Any,
+    roi_pool_size: int = 16,
+    prototype_file: str = None,
+    background_prototype_file: str = None,
+    all_classes_fn: str = None,
+    seen_classes_fn: str = None,
+) -> DeVit:
+    from fsl.utils.matcher import Matcher
+
+    proposal_matcher = Matcher([0.3, 0.7], [0, -1, 1])
+
+    if all_classes_fn and seen_classes_fn and prototype_file:
+        prototypes = ProtoTypes.load(prototype_file)
+        all_cids = read_text_file(all_classes_fn)
+        seen_cids = read_text_file(seen_classes_fn)
+    else:
+        prototypes, all_cids, seen_cids = None, None, None
+
+    bg_prototypes = ProtoTypes.load(background_prototype_file) if background_prototype_file else None
+    return DeVit(generator, proposal_matcher, roi_pool_size, prototypes, bg_prototypes, all_cids, seen_cids)
+
+
 @model_registry
-def devit(
+def devit_sam(
     sam_args: Dict[str, str],
     mask_gen_args: Dict[str, Any] = {},
     roi_pool_size: int = 16,
@@ -453,28 +486,64 @@ def devit(
     all_classes_fn: str = None,
     seen_classes_fn: str = None,
 ) -> DeVit:
+    import pickle
+
     from fsl.models.sam_relational import build_sam_auto_mask_generator
-    from fsl.utils.matcher import Matcher
 
     mask_generator = build_sam_auto_mask_generator(sam_args, mask_gen_args)
-    proposal_matcher = Matcher([0.3, 0.7], [0, -1, 1])
+    return build_devit(
+        mask_generator,
+        roi_pool_size,
+        prototype_file,
+        background_prototype_file,
+        all_classes_fn,
+        seen_classes_fn,
+    )
 
-    if all_classes_fn and seen_classes_fn and prototype_file:
-        prototypes = ProtoTypes.load(prototype_file)
-        all_cids = read_text_file(all_classes_fn)
-        seen_cids = read_text_file(seen_classes_fn)
-        # devit.setup_prototypes(prototypes, all_cids, seen_cids, is_bg=False)
-    else:
-        prototypes, all_cids, seen_cids = None, None, None
 
-    if background_prototype_file:
-        background_prototypes = ProtoTypes.load(background_prototype_file)
-        # devit.setup_prototypes(background_prototypes, is_bg=True)
-    else:
-        background_prototypes = None
+@model_registry
+def devit_dinov2(
+    model_name: str = 'dinov2_vitb14',
+    roi_pool_size: int = 16,
+    prototype_file: str = None,
+    background_prototype_file: str = None,
+    all_classes_fn: str = None,
+    seen_classes_fn: str = None,
+) -> DeVit:
+    backbone = torch.hub.load('facebookresearch/dinov2', model_name)
 
-    return DeVit(
-        mask_generator, proposal_matcher, roi_pool_size, prototypes, background_prototypes, all_cids, seen_cids
+    class DinoV2Patch(nn.Module):
+        def __init__(self, backbone):
+            super(DinoV2Patch, self).__init__()
+            self.backbone = backbone.eval()
+
+        @torch.no_grad()
+        def forward(self, x: _Tensor) -> _Tensor:
+            outputs = self.backbone.get_intermediate_layers(
+                x,
+                n=[
+                    self.backbone.n_blocks - 1,
+                ],
+                reshape=True,
+            )
+            return outputs[0]
+
+        @property
+        def downsize(self) -> int:
+            return self.backbone.patch_size
+
+    for param in backbone.parameters():
+        param.requires_grad_ = False
+
+    backbone = DinoV2Patch(backbone)
+
+    return build_devit(
+        backbone,
+        roi_pool_size,
+        prototype_file,
+        background_prototype_file,
+        all_classes_fn,
+        seen_classes_fn,
     )
 
 

@@ -2,7 +2,7 @@ import os.path as osp
 import pickle
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Dict, List, Type, Union
+from typing import Any, Callable, Dict, List, Type, Union
 
 import numpy as np
 import torch
@@ -70,22 +70,23 @@ class ProtoTypes(object):
 
     @classmethod
     def load(
-        cls, filenames: Union[List[str], str], keys: List[str] = ['embeddings', 'labels']
+        cls,
+        filenames: Union[List[str], str],
+        keys: List[str] = ['embeddings', 'labels'],
+        loader: Callable = pickle.load,
     ) -> Union[List['ProtoTypes'], 'ProtoTypes']:
         is_list = isinstance(filenames, list)
         filenames = [filenames] if not is_list else filenames
         prototypes = []
         for filename in filenames:
             assert osp.isfile(filename)
+            with open(filename, 'rb') as pfile:
+                data = loader(pfile)
 
-            if 'pkl' in filename:
-                with open(filename, 'rb') as pfile:
-                    pt = pickle.load(pfile)
-                    assert isinstance(pt, ProtoTypes)
-                    prototypes.append(pt)
+            if isinstance(data, ProtoTypes):
+                prototypes.append(data)
                 continue
-            else:
-                data = torch.load(filename)
+
             if isinstance(data, torch.Tensor):
                 data = data.flatten(0, 1) if len(data.shape) == 3 else data
                 args = [data, [-1] * data.shape[0]]

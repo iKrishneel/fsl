@@ -18,7 +18,7 @@ if version.minor_version(torchvision.__version__) <= 15:
     from torchvision.datapoints import BoundingBoxFormat
 else:
     from torchvision.tv_tensors import BoundingBoxFormat
-    
+
 
 Coord = Union[List[int], np.ndarray, torch.Tensor]
 Array = Union[np.ndarray, torch.Tensor]
@@ -32,6 +32,8 @@ class Instances(object):
     class_ids: List[int] = field(default_factory=lambda: [])
     bbox_fmt: BoundingBoxFormat = BoundingBoxFormat.XYWH
     image_id: str = ""
+    image_height: int = -1
+    image_width: int = -1
 
     def __post_init__(self):
         size = max(len(self.bboxes), self.masks.shape[0] if self.masks is not None else 0, len(self.class_ids))

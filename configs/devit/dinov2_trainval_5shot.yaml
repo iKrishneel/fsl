@@ -13,16 +13,17 @@ distributed:
     init_method: tcp://127.0.0.1:23456
 
 models:
-  devit_sam:
-    sam_args:
-      model: vit_b
+  devit_dinov2:
+    model_name: "dinov2_vitb14"
+    roi_pool_size: 7
     all_classes_fn: "../data/coco/all_classes.txt"
     seen_classes_fn: "../data/coco/seen_classes.txt"
-    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/fs_coco_trainval_novel_5shot.pkl"
+    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/dinov2/fs_coco14_trainval_base_5shot.vitb14.pkl"
+    background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/dinov2/background_prototypes.vitb14.pth"
 
 datasets:
   dataloader:
-    batch_size: 2
+    batch_size: 1
     num_workers: 0
     shuffle: False
     pin_memory: True
@@ -40,10 +41,15 @@ transforms:
     ConvertFormatBoundingBox:
       old_fmt: "XYWH"
       new_fmt: "XYXY"
-    ResizeLongestSide:
-      size: 1024
+    # Resize:
+    #   size: [896, 896]
+    ResizeToDivisible:
+      factor: 14
     PadToSize:
-      size: 1024
+      size: 896
+    Normalize:
+      mean: [0.48145466, 0.4578275, 0.40821073]
+      std: [0.26862954, 0.26130258, 0.27577711]
 
 solvers:
   engine: "torch.optim"
@@ -64,11 +70,12 @@ io:
     root: "perception/models/fsl/sam_vitb_coco17_5shot/"
 
 build:
-  devit_sam:
+  devit_dinov2:
     dataset: "coco"
+    weights: "/root/krishneel/Downloads/fsl/weights/dinov2_trainval_5shot.pth"
     train:
       solver: "SGD"
       scheduler: "StepLR"
       epochs: 10
 
-  model: "devit_sam"
+  model: "devit_dinov2"

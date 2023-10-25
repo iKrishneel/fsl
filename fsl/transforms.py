@@ -11,6 +11,7 @@ from PIL import Image
 
 torchvision.disable_beta_transforms_warning()  # NOQA
 
+from torchvision import transforms
 from torchvision.transforms.v2 import functional as TF
 
 from fsl.utils import version
@@ -53,6 +54,24 @@ class ResizeLongestSide(nn.Module):
         neww = int(neww + 0.5)
         newh = int(newh + 0.5)
         return (newh, neww)
+
+
+@transform_registry
+class Resize(nn.Module):
+    def __init__(self, size: Union[List[int], int]):
+        super(Resize, self).__init__()
+        self.size = size
+
+    def forward(self, image: Union[_Image, np.ndarray], bboxes: List[_Tensor] = None) -> Tuple[_Image, _Tensor]:
+        image = Image.fromarray(image) if isinstance(image, np.ndarray) else image
+        img_hw = image.size[::-1]
+
+        image = TF.resize(image, self.size)
+
+        if bboxes is not None:
+            bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=image.size[::-1])[0] for bbox in bboxes]
+
+        return image, bboxes
 
 
 @transform_registry
@@ -112,25 +131,39 @@ class ConvertFormatBoundingBox(nn.Module):
         self.old_fmt, self.new_fmt = [getattr(BoundingBoxFormat, fmt) for fmt in [old_fmt, new_fmt]]
 
     def forward(self, image: _Image, bboxes: List[_Tensor]) -> Tuple[_Image, List[_Tensor]]:
-        convert_bounding_box_format = TF.convert_format_bounding_box \
-            if version.minor_version(torchvision.__version__) < 16 else TF.convert_bounding_box_format
+        convert_bounding_box_format = (
+            TF.convert_format_bounding_box
+            if version.minor_version(torchvision.__version__) < 16
+            else TF.convert_bounding_box_format
+        )
         bboxes = [convert_bounding_box_format(bbox, self.old_fmt, self.new_fmt) for bbox in bboxes]
         return image, bboxes
 
 
 @transform_registry
-class ClipPreprocess(nn.Module):
+class Normalize(nn.Module):
     def __init__(
         self,
         mean: List[float] = [0.48145466, 0.4578275, 0.40821073],
         std: List[float] = [0.26862954, 0.26130258, 0.27577711],
-    ):
-        super(ClipPreprocess, self).__init__()
+    ) -> None:
+        super(Normalize, self).__init__()
         self.mean = mean
         self.std = std
 
-    def forward(self, image: _Image, bboxes: List[_Tensor] = None):
-        image = TF.to_image_tensor(image)
-        image = image.float() / 255.0
+    def forward(self, image: _Image, bboxes: List[_Tensor] = None) -> Tuple[_Tensor, List[_Tensor]]:
+        image = TF.to_image_tensor(image).float() / 255.0
         image = TF.normalize(image, self.mean, self.std)
         return image, bboxes
+
+
+@transform_registry
+class ResizeToDivisible(nn.Module):
+    def __init__(self, factor: float):
+        super(ResizeToDivisible, self).__init__()
+        self.factor = factor
+
+    def forward(self, image: _Image, bboxes: List[_Tensor]) -> Tuple[_Tensor, List[_Tensor]]:
+        w, h = image.size
+        h, w = h - h % self.factor, w - w % self.factor
+        return Resize([h, w])(image, bboxes)

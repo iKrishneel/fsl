@@ -21,7 +21,6 @@ from igniter.registry import dataset_registry, func_registry
 from fsl.structures import Instances
 from fsl.utils import version
 
-
 if version.minor_version(torchvision.__version__) <= 15:
     from torchvision.datapoints import BoundingBoxFormat
 else:
@@ -110,23 +109,24 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
             try:
                 iid = self.ids[index]
                 image, targets = self._load(iid)
-
                 assert len(targets) > 0
-
-                # FIXME: Add targets transform parsing directly from config
-                category_ids = [target['category_id'] for target in targets]
-                bboxes = [torch.Tensor(target['bbox']) for target in targets]
-                category_names = [label_name_mapping[target['category_id']] for target in targets]
-
-                assert len(bboxes) > 0, 'Empty bounding boxes'
-
-                for transform in self.transforms.transforms:
-                    image, bboxes = transform(image, bboxes)
-
                 break
             except Exception as e:
                 logger.warning(f'{e} for iid: {iid} index: {index}')
                 index = np.random.choice(np.arange(len(self.ids)))
+
+        # FIXME: Add targets transform parsing directly from config
+        category_ids = [target['category_id'] for target in targets]
+        bboxes = [torch.Tensor(target['bbox']) for target in targets]
+        category_names = [label_name_mapping[target['category_id']] for target in targets]
+
+        assert len(bboxes) > 0, 'Empty bounding boxes'
+
+        if image.mode != 'RBG':
+            image = image.convert('RGB')
+
+        for transform in self.transforms.transforms:
+            image, bboxes = transform(image, bboxes)
 
         return {
             'image': image,
@@ -270,12 +270,16 @@ def collate_data(batches: List[Dict[str, Any]]) -> List[Any]:
 def collate_data_instances(batches: List[Dict[str, Any]]) -> List[Any]:
     images, targets = [], []
     for batch in batches:
-        images.append(batch.pop('image'))
+        image = batch.pop('image')
+        images.append(image)
         instances = Instances(
             bboxes=batch['bboxes'],
             class_ids=batch['category_ids'],
             labels=batch['category_names'],
             bbox_fmt=BoundingBoxFormat.XYXY,
+            image_id=batch['image_ids'][0],
+            image_width=image.shape[-1],
+            image_height=image.shape[-2],
         )
         targets.append({'gt_proposal': instances})
     return images, targets
