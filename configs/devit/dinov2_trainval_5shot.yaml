@@ -34,22 +34,27 @@ datasets:
       root: "perception/datasets/coco/train2017"
       # anno_fn: "perception/datasets/coco/annotations/instances_val2017.json"
       anno_fn: "/root/krishneel/Downloads/fs_coco17_base_train.json"
+    val:
+      bucket_name: *bucket
+      root: "perception/datasets/coco/val2017"
+      # anno_fn: "perception/datasets/coco/annotations/instances_val2017.json"
+      anno_fn: "/root/krishneel/Downloads/fs_coco17_base_val.json"
 
 transforms:
-  train:
+  train: &trans
     engine: "torchvision.transforms"
     ConvertFormatBoundingBox:
       old_fmt: "XYWH"
       new_fmt: "XYXY"
-    # Resize:
-    #   size: [896, 896]
+    ResizeLongestSide:
+      size: 1333
     ResizeToDivisible:
       factor: 14
-    PadToSize:
-      size: 896
     Normalize:
       mean: [0.48145466, 0.4578275, 0.40821073]
       std: [0.26862954, 0.26130258, 0.27577711]
+  val:
+    <<: *trans
 
 solvers:
   engine: "torch.optim"
@@ -70,6 +75,7 @@ io:
     root: "perception/models/fsl/sam_vitb_coco17_5shot/"
 
 build:
+  mode: "train"
   devit_dinov2:
     dataset: "coco"
     weights: "/root/krishneel/Downloads/fsl/weights/dinov2_trainval_5shot.pth"
@@ -77,6 +83,9 @@ build:
       solver: "SGD"
       scheduler: "StepLR"
       epochs: 10
+    val:
+      func: "default_val_forward"
+      transforms: "val"
     inference:
       engine: "inference"
 

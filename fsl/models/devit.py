@@ -77,10 +77,7 @@ class PropagateNet(nn.Module):
             outputs.append({'class': self.class_proj(latent)})
 
         results = [o['class'] for o in outputs]
-
-        if not self.training:
-            results = results[-1]
-        return results
+        return results if self.training else results[-1]
 
 
 class DeVit(nn.Module):
@@ -148,7 +145,7 @@ class DeVit(nn.Module):
             self.register_buffer('test_class_weight', pt.normalized_embedding[torch.as_tensor(test_class_order)])
 
     def forward(self, images: List[_Tensor], targets: List[Dict[str, Any]] = None) -> Dict[str, Any]:
-        if not self.training or True:
+        if not self.training:
             return self.forward_once(images, targets)
 
         num_classes = len(self.train_class_weight)
@@ -232,7 +229,7 @@ class DeVit(nn.Module):
         roi_features = roi_features.flatten(2)
         bs, spatial_size = roi_features.shape[0], roi_features.shape[-1]
 
-        class_weight = self.train_class_weight
+        class_weights = self.train_class_weight
         # (N x spatial x emb) @ (emb x class) = N x spatial x class
 
         # sample topk classes
@@ -248,7 +245,7 @@ class DeVit(nn.Module):
 
         if sample_class_enabled:
             num_active_classes = class_topk
-            init_scores = nn.functional.normalize(roi_features.flatten(2).mean(2), dim=1) @ class_weight.T
+            init_scores = nn.functional.normalize(roi_features.flatten(2).mean(2), dim=1) @ class_weights.T
             topk_class_indices = torch.topk(init_scores, class_topk, dim=1).indices
 
             class_indices = []
@@ -266,7 +263,7 @@ class DeVit(nn.Module):
             num_active_classes = num_classes
 
         logits = self.get_logits(
-            class_weight, roi_features, class_indices, class_topk, sample_class_enabled, num_classes, num_active_classes
+            class_weights, roi_features, class_indices, class_topk, sample_class_enabled, num_classes, num_active_classes
         )
 
         # loss
@@ -350,36 +347,31 @@ class DeVit(nn.Module):
             num_active_classes,
         )
 
-        scores = nn.functional.softmax(torch.stack(logits), dim=-1)
+        scores = torch.softmax(logits, dim=-1)
         output = {'scores': scores[:, :-1]}
 
-        """
         if sample_class_enabled:
             full_scores = torch.zeros(len(scores), num_classes + 1, device=self.device)
             full_scores.scatter_(1, class_indices, scores)
+
+            scores = full_scores
             full_scores[:, -1] = scores[:, -1]
             output['scores'] = full_scores[:, :-1]
-        """
-        import sys
 
-        import IPython
-
-        IPython.embed(header="Forward Once")
-        sys.exit()
-
-        return output
+        # import IPython, sys; IPython.embed(header="Forward Once"); sys.exit()
+        return output, {'loss': 0.0}  # loss is not yet computed
 
     def get_logits(
         self,
-        class_weight,
+        class_weights,
         roi_features,
         class_indices,
         class_topk,
         sample_class_enabled,
         num_classes,
         num_active_classes,
-    ):
-        feats = roi_features.transpose(-2, -1) @ class_weight.T
+    ) -> Union[_Tensor, List[_Tensor]]:
+        feats = roi_features.transpose(-2, -1) @ class_weights.T
         bs, spatial_size = roi_features.shape[0], roi_features.shape[-1]
 
         other_classes = []
@@ -457,7 +449,7 @@ class DeVit(nn.Module):
         else:
             cls_logits = cls_logits.reshape(bs, num_active_classes)
 
-        if bg_logits:
+        if bg_logits is not None:
             if isinstance(bg_logits, list):
                 logits = []
                 for c, b in zip(cls_logits, bg_logits):
@@ -596,13 +588,7 @@ def devit_dinov2(
 
         @torch.no_grad()
         def forward(self, x: _Tensor) -> _Tensor:
-            outputs = self.backbone.get_intermediate_layers(
-                x,
-                n=[
-                    self.backbone.n_blocks - 1,
-                ],
-                reshape=True,
-            )
+            outputs = self.backbone.get_intermediate_layers(x, n=[self.backbone.n_blocks - 1], reshape=True)
             return outputs[0]
 
         @property
