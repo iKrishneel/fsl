@@ -200,21 +200,13 @@ class DeVit(nn.Module):
             proposals_per_image = proposals_per_image[sampled_idxs]
             class_labels_i = class_labels_i[sampled_idxs]
 
-            # gt_boxes_i = (
-            #     targets_per_image.bboxes[matched_idxs[sampled_idxs]]
-            #     if len(targets_per_image.bboxes) > 0
-            #     else torch.zeros(len(sampled_idxs), 4, device=device)
-            # )  # not used anyway
-
             resampled_proposals.append(proposals_per_image)
             class_labels.append(class_labels_i)
-            # matched_gt_boxes.append(gt_boxes_i)
 
             num_bg_samples.append((class_labels_i == num_classes).sum().item())
             num_fg_samples.append(class_labels_i.numel() - num_bg_samples[-1])
 
         class_labels = torch.cat(class_labels)
-        # matched_gt_boxes = torch.cat(matched_gt_boxes)
 
         rois = []
         for bid, box in enumerate(resampled_proposals):
@@ -223,33 +215,19 @@ class DeVit(nn.Module):
         rois = torch.cat(rois)
 
         roi_features = self.roi_pool(features, rois)  # N, C, k, k
-        roi_bs = len(roi_features)
-
-        # classification
-        roi_features = roi_features.flatten(2)
-        bs, spatial_size = roi_features.shape[0], roi_features.shape[-1]
-
-        class_weights = self.train_class_weight
-        # (N x spatial x emb) @ (emb x class) = N x spatial x class
 
         # sample topk classes
-        class_topk = self.num_sample_class
-        class_indices = None
-
-        if class_topk < 0:
-            class_topk = num_classes
-            sample_class_enabled = False
-        else:
-            class_topk = num_classes if class_topk == 0 else class_topk
-            sample_class_enabled = True
+        class_topk = self.num_sample_class if self.num_sample_class > 0 else num_classes
+        sample_class_enabled = class_topk > 0
+        num_active_classes, class_indices = num_classes, None
 
         if sample_class_enabled:
             num_active_classes = class_topk
-            init_scores = nn.functional.normalize(roi_features.flatten(2).mean(2), dim=1) @ class_weights.T
+            init_scores = nn.functional.normalize(roi_features.flatten(2).mean(2), dim=1) @ self.train_class_weight.T
             topk_class_indices = torch.topk(init_scores, class_topk, dim=1).indices
 
             class_indices = []
-            for i in range(roi_bs):
+            for i in range(roi_features.shape[0]):
                 curr_label = class_labels[i].item()
                 topk_class_indices_i = topk_class_indices[i].cpu()
                 if curr_label in topk_class_indices_i or curr_label == num_classes:
@@ -259,23 +237,24 @@ class DeVit(nn.Module):
                 class_indices.append(curr_indices)
             class_indices = torch.stack(class_indices).to(self.device)
             class_indices = torch.sort(class_indices, dim=1).values
-        else:
-            num_active_classes = num_classes
 
         logits = self.get_logits(
-            class_weights, roi_features, class_indices, class_topk, sample_class_enabled, num_classes, num_active_classes
+            self.train_class_weight,
+            roi_features,
+            class_indices,
+            class_topk,
+            sample_class_enabled,
+            num_classes,
+            num_active_classes,
         )
 
         # loss
         class_labels = class_labels.long().to(self.device)
         if sample_class_enabled:
-            bg_indices = class_labels == num_classes
-            fg_indices = class_labels != num_classes
+            class_labels[class_labels != num_classes] = (class_indices == class_labels.view(-1, 1)).nonzero()[:, 1]
+            class_labels[class_labels == num_classes] = num_active_classes
 
-            class_labels[fg_indices] = (class_indices == class_labels.view(-1, 1)).nonzero()[:, 1]
-            class_labels[bg_indices] = num_active_classes
-
-        if not bg_logits:
+        if self.bg_tokens is not None and self.fc_back_class is not None:
             indices = torch.where(class_labels != num_active_classes)
             class_labels = class_labels[indices]
             logits = [logit[indices] for logit in logits]
@@ -287,10 +266,14 @@ class DeVit(nn.Module):
                     logit, class_labels, num_classes=num_active_classes, bg_weight=self.bg_cls_weight
                 )
         else:
-            loss = self.focal_loss(logits, class_labels, num_classes=num_active_classes, bg_weight=self.bg_cls_weight)
-            loss_dict['focal_loss'] = loss
+            loss_dict['focal_loss'] = self.focal_loss(
+                logits, class_labels, num_classes=num_active_classes, bg_weight=self.bg_cls_weight
+            )
 
-        # import IPython, sys; IPython.embed(header="Forward"); sys.exit()
+        import IPython, sys
+
+        IPython.embed(header="Forward")
+        sys.exit()
         return loss_dict
 
     @torch.no_grad()
@@ -302,7 +285,7 @@ class DeVit(nn.Module):
 
         assert len(proposals) == 1
 
-        class_weights = self.test_class_weight
+        # class_weights = self.test_class_weight
         num_classes = len(self.test_class_weight)
 
         bboxes = torch.cat([proposal.to_tensor().bboxes.to(self.device) for proposal in proposals])
@@ -312,33 +295,20 @@ class DeVit(nn.Module):
         features = self.mask_generator(images)
 
         roi_features = self.roi_pool(features, rois)  # N, C, k, k
-        roi_bs = len(roi_features)
-
-        roi_features = roi_features.flatten(2)
-        bs, spatial_size = roi_features.shape[0], roi_features.shape[-1]
-        # (N x spatial x emb) @ (emb x class) = N x spatial x class
-        feats = roi_features.transpose(-2, -1) @ class_weights.T
 
         # sample topk classes
-        class_topk = self.num_sample_class
-        class_indices = None
-        if class_topk < 0:
-            class_topk = num_classes
-            sample_class_enabled = False
-        else:
-            class_topk = num_classes if class_topk == 0 else class_topk
-            sample_class_enabled = True
+        class_topk = self.num_sample_class if self.num_sample_class > 0 else num_classes
+        sample_class_enabled = class_topk > 0
+        num_active_classes, class_indices = num_classes, None
 
         if sample_class_enabled:
             num_active_classes = class_topk
-            init_scores = nn.functional.normalize(roi_features.flatten(2).mean(2), dim=1) @ class_weights.T
+            init_scores = nn.functional.normalize(roi_features.flatten(2).mean(2), dim=1) @ self.test_class_weight.T
             topk_class_indices = torch.topk(init_scores, class_topk, dim=1).indices
             class_indices = torch.sort(topk_class_indices, dim=1).values
-        else:
-            num_active_classes = num_classes
 
         logits = self.get_logits(
-            class_weights,
+            self.test_class_weight,
             roi_features,
             class_indices,
             class_topk,
@@ -371,6 +341,7 @@ class DeVit(nn.Module):
         num_classes,
         num_active_classes,
     ) -> Union[_Tensor, List[_Tensor]]:
+        roi_features = roi_features.flatten(2) if len(roi_features.shape) == 4 else roi_features
         feats = roi_features.transpose(-2, -1) @ class_weights.T
         bs, spatial_size = roi_features.shape[0], roi_features.shape[-1]
 
@@ -619,7 +590,7 @@ if __name__ == '__main__':
     an = '../../data/coco/all_classes.txt'
     sn = '../../data/coco/seen_classes.txt'
 
-    m = devit(
+    m = devit_sam(
         {'model': 'vit_b', 'checkpoint': None},
         prototype_file=fn,
         # background_prototype_file=bg,
