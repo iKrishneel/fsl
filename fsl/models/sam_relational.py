@@ -13,6 +13,7 @@ from segment_anything import SamAutomaticMaskGenerator as _SAMG
 from segment_anything import SamPredictor as _SamPredictor
 from segment_anything import sam_model_registry
 from torchvision.ops import RoIAlign
+from torchvision.datapoints import BoundingBoxFormat
 
 from fsl.datasets.s3_coco_dataset import S3CocoDatasetSam
 from fsl.structures import Proposal
@@ -111,18 +112,20 @@ class SamPredictor(nn.Module, _SamPredictor):
         return self.set_images(images)
 
     @torch.no_grad()
-    def set_images(self, images: List[np.ndarray], image_format: str = 'RGB') -> None:
-        assert image_format in ['RGB', 'BGR'], f"image_format must be in ['RGB', 'BGR'], is {image_format}."
-        if image_format != self.model.image_format:
-            images = [image[..., ::-1] for image in images]
+    def set_images(self, images: List[Union[np.ndarray, _Tensor]], image_format: str = 'RGB') -> None:
+        if isinstance(images[0], np.ndarray):
+            assert image_format in ['RGB', 'BGR'], f"image_format must be in ['RGB', 'BGR'], is {image_format}."
+            if image_format != self.model.image_format:
+                images = [image[..., ::-1] for image in images]
+            input_images = [
+                torch.as_tensor(self.transform.apply_image(image)).permute(2, 0, 1).contiguous() for image in images
+            ]
+            images = torch.stack(
+                [self.model.preprocess(image.to(self.device)) for image in input_images]
+            ).to(self.device)
 
-        input_images = [
-            torch.as_tensor(self.transform.apply_image(image)).permute(2, 0, 1).contiguous() for image in images
-        ]
-        input_images = [self.model.preprocess(image.to(self.device)) for image in input_images]
-        input_images_torch = torch.stack(input_images).to(self.device)
         self.model.image_encoder.to(self.device)
-        return self.model.image_encoder(input_images_torch)
+        return self.model.image_encoder(images)
 
     @property
     def img_size(self) -> List[int]:
@@ -152,9 +155,14 @@ class SamAutomaticMaskGenerator(nn.Module, _SAMG):
 
         self.predictor = SamPredictor(model)
 
-    def forward(self, images: List[Union[np.ndarray, _Image]]) -> _Tensor:
-        x = [np.asarray(image) for image in images]
-        return self.predictor.set_images(x)
+    def forward(self, images: List[Union[np.ndarray, _Image, _Tensor]]) -> _Tensor:
+        dtype = type(images[0])
+        for image in images:
+            assert isinstance(image, dtype), 'All image must be of same type'
+
+        if dtype != torch.Tensor:
+            images = [np.asarray(image) for image in images]
+        return self.predictor.set_images(images)
 
     def get_proposals(self, image: Union[_Image, np.ndarray]) -> List[Dict[str, Any]]:
         image = np.asarray(image)

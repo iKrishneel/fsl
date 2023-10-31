@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 import numpy as np
 import torch
 import torchvision
+from PIL import Image
 from omegaconf import DictConfig, OmegaConf
 
 torchvision.disable_beta_transforms_warning()

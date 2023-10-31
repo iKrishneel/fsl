@@ -100,7 +100,7 @@ class DeVit(nn.Module):
         self.batch_size_per_image = 128
         self.pos_ratio = 0.25
         self.num_sample_class = 10
-        self.t_len = 128  # 256
+        self.t_len = 256 // 2
         self.temb = 128
         self.t_pos_emb = 128
         self.t_bg_emb = 128
@@ -251,10 +251,13 @@ class DeVit(nn.Module):
         # loss
         class_labels = class_labels.long().to(self.device)
         if sample_class_enabled:
-            class_labels[class_labels != num_classes] = (class_indices == class_labels.view(-1, 1)).nonzero()[:, 1]
-            class_labels[class_labels == num_classes] = num_active_classes
+            bg_indices = class_labels == num_classes
+            fg_indices = class_labels != num_classes
 
-        if self.bg_tokens is not None and self.fc_back_class is not None:
+            class_labels[fg_indices] = (class_indices == class_labels.view(-1, 1)).nonzero()[:, 1]
+            class_labels[bg_indices] = num_active_classes
+
+        if self.bg_tokens is None:
             indices = torch.where(class_labels != num_active_classes)
             class_labels = class_labels[indices]
             logits = [logit[indices] for logit in logits]
@@ -270,10 +273,7 @@ class DeVit(nn.Module):
                 logits, class_labels, num_classes=num_active_classes, bg_weight=self.bg_cls_weight
             )
 
-        import IPython, sys
-
-        IPython.embed(header="Forward")
-        sys.exit()
+        # import IPython, sys; IPython.embed(header="Forward"); sys.exit()
         return loss_dict
 
     @torch.no_grad()
@@ -328,7 +328,7 @@ class DeVit(nn.Module):
             full_scores[:, -1] = scores[:, -1]
             output['scores'] = full_scores[:, :-1]
 
-        # import IPython, sys; IPython.embed(header="Forward Once"); sys.exit()
+        import IPython, sys; IPython.embed(header="Forward Once"); sys.exit()
         return output, {'loss': 0.0}  # loss is not yet computed
 
     def get_logits(
@@ -344,6 +344,7 @@ class DeVit(nn.Module):
         roi_features = roi_features.flatten(2) if len(roi_features.shape) == 4 else roi_features
         feats = roi_features.transpose(-2, -1) @ class_weights.T
         bs, spatial_size = roi_features.shape[0], roi_features.shape[-1]
+        roi_pool_size = [self.roi_pool.output_size] * 2
 
         other_classes = []
         if sample_class_enabled:
@@ -353,23 +354,21 @@ class DeVit(nn.Module):
                 _ = torch.gather(
                     feats, 2, indexes[cmask].view(bs, spatial_size, num_classes - 1)
                 )  # N x spatial x classes-1
-                other_classes.append(_[:, :, None, :])
+                other_classes.append(_[:, None, :, :])
         else:
             for c in range(num_classes):  # TODO: change to classes sampling during training for LVIS type datasets
                 cmask = torch.ones(num_classes, device=self.device, dtype=torch.bool)
                 cmask[c] = False
                 _ = feats[:, :, cmask]  # # N x spatial x classes-1
-                other_classes.append(_[:, :, None, :])
+                other_classes.append(_[:, None, :, :])
 
-        other_classes = torch.cat(other_classes, dim=2)  # N x spatial x classes x classes-1
-        other_classes = other_classes.permute(0, 2, 1, 3)  # N x classes x spatial x classes-1
+        other_classes = torch.cat(other_classes, dim=1)  # N x spatial x classes x classes-1
         other_classes = other_classes.flatten(0, 1)  # (Nxclasses) x spatial x classes-1
         other_classes, _ = torch.sort(other_classes, dim=-1)
         other_classes = self.interpolate(other_classes, self.t_len, mode='linear')  # (Nxclasses) x spatial x T
         other_classes = self.fc_other_class(other_classes)  # (Nxclasses) x spatial x emb
         other_classes = other_classes.permute(0, 2, 1)  # (Nxclasses) x emb x spatial
         # (Nxclasses) x emb x S x S
-        roi_pool_size = [self.roi_pool.output_size] * 2
         inter_dist_emb = other_classes.reshape(bs * num_active_classes, -1, *roi_pool_size)
 
         intra_feats = (
@@ -429,7 +428,8 @@ class DeVit(nn.Module):
                 # N x (classes + 1)
                 logits = torch.cat([cls_logits, bg_logits], dim=1) / self.cls_temp
         else:
-            logits = cls_logits / self.cls_temp
+            logits = [logit / self.cls_temp for logit in cls_logits] \
+                if isinstance(cls_logits, list) else cls_logits / self.cls_temp
 
         return logits
 

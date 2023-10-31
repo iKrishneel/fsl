@@ -34,13 +34,13 @@ datasets:
       # anno_fn: "perception/datasets/coco/annotations/instances_val2017.json"
       anno_fn: "/root/krishneel/Downloads/fs_coco17_base_train.json"
     val:
-      bucket_name: &bucket "sr-shokunin"
+      bucket_name: *bucket
       root: "perception/datasets/coco/val2017"
       # anno_fn: "perception/datasets/coco/annotations/instances_val2017.json"
       anno_fn: "/root/krishneel/Downloads/fs_coco17_base_val.json"
 
 transforms:
-  train:
+  train: &trans
     engine: "torchvision.transforms"
     ConvertFormatBoundingBox:
       old_fmt: "XYWH"
@@ -49,6 +49,11 @@ transforms:
       size: 1024
     PadToSize:
       size: 1024
+    Normalize:
+      mean: [0.48145466, 0.4578275, 0.40821073]
+      std: [0.26862954, 0.26130258, 0.27577711]
+  val:
+    <<: *trans
 
 solvers:
   engine: "torch.optim"

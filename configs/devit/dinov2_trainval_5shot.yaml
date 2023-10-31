@@ -83,7 +83,7 @@ build:
       solver: "SGD"
       scheduler: "StepLR"
       epochs: 10
-    val1:
+    val:
       func: "default_val_forward"
       transforms: "val"
     inference:
