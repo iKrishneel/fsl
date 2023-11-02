@@ -21,7 +21,7 @@ def normalize(x: _Tensor, dim: int = -1, keepdim: bool = True):
 
 
 class CLIP(nn.Module):
-    def __init__(self, clip_model: str, remove_keys: List[str] = ['visual']):
+    def __init__(self, clip_model: str, remove_keys: List[str] = []):
         super(CLIP, self).__init__()
         assert clip_model in clip.available_models(), f'{clip_model} not found. Available are {clip.available_models()}'
         self.clip_model, self.preprocessing = self.get_clip_model(clip_model, remove_keys=remove_keys)
@@ -56,6 +56,10 @@ class CLIP(nn.Module):
         for parameter in model.parameters():
             parameter.requires_grad = False
         return model, preprocessng
+
+
+def build_clip(model_name: str, remove_keys: List[str] = ['visual']) -> CLIP:
+    return CLIP(model_name, remove_keys)
 
 
 class SamPlusCLIP(nn.Module):

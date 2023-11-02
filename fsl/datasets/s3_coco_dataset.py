@@ -19,7 +19,6 @@ from igniter.datasets import S3CocoDataset, S3Dataset
 from igniter.logger import logger
 from igniter.registry import dataset_registry, func_registry
 
-from fsl.structures import Instances
 from fsl.utils import version
 
 if version.minor_version(torchvision.__version__) <= 15:
@@ -275,6 +274,8 @@ def collate_data(batches: List[Dict[str, Any]]) -> List[Any]:
 
 @func_registry
 def collate_data_instances(batches: List[Dict[str, Any]]) -> List[Any]:
+    from fsl.structures import Instances
+
     images, targets = [], []
     for batch in batches:
         image = batch.pop('image')

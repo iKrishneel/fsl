@@ -82,7 +82,7 @@ class PropagateNet(nn.Module):
         return results if self.training else results[-1]
 
 
-class DeVit2(nn.Module):
+class DeVit(nn.Module):
     def __init__(
         self,
         fg_prototypes: ProtoTypes = None,
@@ -90,7 +90,7 @@ class DeVit2(nn.Module):
         all_cids: List[str] = None,
         seen_cids: List[str] = None,
     ):
-        super(DeVit2, self).__init__()
+        super(DeVit, self).__init__()
 
         # TODO: Configure this
         self.batch_size_per_image = 128
@@ -258,12 +258,7 @@ class DeVit2(nn.Module):
 
         print(y_pred, y_true)
 
-        import sys
-
-        import IPython
-
-        IPython.embed(header="Forward Once")
-        sys.exit()
+        # import IPython, sys; IPython.embed(header="Forward Once")sys.exit()
         return output, {'loss': 0.0}  # loss is not yet computed
 
     def get_logits(
@@ -279,7 +274,10 @@ class DeVit2(nn.Module):
         roi_features = roi_features.flatten(2) if len(roi_features.shape) == 4 else roi_features
         feats = roi_features.transpose(-2, -1) @ class_weights.T
         bs, spatial_size = roi_features.shape[0], roi_features.shape[-1]
-        roi_pool_size = [self.roi_pool.output_size] * 2
+        # roi_pool_size = [self.roi_pool.output_size] * 2
+        hw = np.sqrt(spatial_size)
+        assert hw.is_integer(), 'Only square roi shape is support!'
+        roi_pool_size = [int(hw), int(hw)]
 
         other_classes = []
         if sample_class_enabled:
@@ -317,9 +315,7 @@ class DeVit2(nn.Module):
 
         # (Nxclasses) x emb x S x S
         intra_dist_emb = (
-            intra_dist_emb.permute(0, 2, 3, 1)
-            .flatten(0, 1)
-            .reshape(bs * num_active_classes, -1, *[self.roi_pool.output_size] * 2)
+            intra_dist_emb.permute(0, 2, 3, 1).flatten(0, 1).reshape(bs * num_active_classes, -1, *roi_pool_size)
         )
 
         # N x 1
@@ -423,7 +419,7 @@ class DeVit2(nn.Module):
         return self.fc_other_class.weight.device
 
 
-class DeVit(DeVit2):
+class DeVitSam(DeVit):
     def __init__(
         self,
         mask_generator: _Module,
@@ -434,7 +430,7 @@ class DeVit(DeVit2):
         all_cids: List[str] = None,
         seen_cids: List[str] = None,
     ):
-        super(DeVit, self).__init__(fg_prototypes, bg_prototypes, all_cids, seen_cids)
+        super(DeVitSam, self).__init__(fg_prototypes, bg_prototypes, all_cids, seen_cids)
         self.mask_generator = mask_generator
         self.proposal_matcher = proposal_matcher
         self.roi_pool = RoIAlign(roi_pool_size, spatial_scale=1 / mask_generator.downsize, sampling_ratio=-1)
@@ -558,13 +554,30 @@ def read_text_file(filename: str) -> List[str]:
 
 
 def build_devit(
+    prototype_file: str = None,
+    background_prototype_file: str = None,
+    all_classes_fn: str = None,
+    seen_classes_fn: str = None,
+) -> DeVit:
+    if all_classes_fn and seen_classes_fn and prototype_file:
+        prototypes = ProtoTypes.load(prototype_file)
+        all_cids = read_text_file(all_classes_fn)
+        seen_cids = read_text_file(seen_classes_fn)
+    else:
+        prototypes, all_cids, seen_cids = None, None, None
+
+    bg_prototypes = ProtoTypes.load(background_prototype_file) if background_prototype_file else None
+    return DeVit(prototypes, bg_prototypes, all_cids, seen_cids)
+
+
+def build_devit_sam(
     generator: Any,
     roi_pool_size: int = 16,
     prototype_file: str = None,
     background_prototype_file: str = None,
     all_classes_fn: str = None,
     seen_classes_fn: str = None,
-) -> DeVit:
+) -> DeVitSam:
     proposal_matcher = Matcher([0.3, 0.7], [0, -1, 1])
 
     if all_classes_fn and seen_classes_fn and prototype_file:
@@ -575,7 +588,7 @@ def build_devit(
         prototypes, all_cids, seen_cids = None, None, None
 
     bg_prototypes = ProtoTypes.load(background_prototype_file) if background_prototype_file else None
-    return DeVit(generator, proposal_matcher, roi_pool_size, prototypes, bg_prototypes, all_cids, seen_cids)
+    return DeVitSam(generator, proposal_matcher, roi_pool_size, prototypes, bg_prototypes, all_cids, seen_cids)
 
 
 @model_registry
@@ -587,11 +600,11 @@ def devit_sam(
     background_prototype_file: str = None,
     all_classes_fn: str = None,
     seen_classes_fn: str = None,
-) -> DeVit:
+) -> DeVitSam:
     from fsl.models.sam_relational import build_sam_auto_mask_generator
 
     mask_generator = build_sam_auto_mask_generator(sam_args, mask_gen_args)
-    return build_devit(
+    return build_devit_sam(
         mask_generator,
         roi_pool_size,
         prototype_file,
@@ -609,7 +622,7 @@ def devit_dinov2(
     background_prototype_file: str = None,
     all_classes_fn: str = None,
     seen_classes_fn: str = None,
-) -> DeVit:
+) -> DeVitSam:
     backbone = torch.hub.load('facebookresearch/dinov2', model_name)
 
     class DinoV2Patch(nn.Module):
@@ -631,7 +644,7 @@ def devit_dinov2(
 
     backbone = DinoV2Patch(backbone)
 
-    return build_devit(
+    return build_devit_sam(
         backbone,
         roi_pool_size,
         prototype_file,
@@ -639,35 +652,3 @@ def devit_dinov2(
         all_classes_fn,
         seen_classes_fn,
     )
-
-
-if __name__ == '__main__':
-    from torchvision.datapoints import BoundingBoxFormat
-
-    # fn = '/root/krishneel/Downloads/fs_coco_trainval_novel_10shot.vitl14.pkl'
-    fn = '/root/krishneel/Downloads/fsl/prototypes/fs_coco_trainval_novel_5shot.pkl'
-    bg = '/root/krishneel/Downloads/background_prototypes.vitb14.pth'
-    an = '../../data/coco/all_classes.txt'
-    sn = '../../data/coco/seen_classes.txt'
-
-    m = devit_sam(
-        {'model': 'vit_b', 'checkpoint': None},
-        prototype_file=fn,
-        # background_prototype_file=bg,
-        all_classes_fn=an,
-        seen_classes_fn=sn,
-    )
-    m.cuda()
-
-    im = Image.open('/root/krishneel/Downloads/000000.jpg')
-    proposal = Instances(
-        bboxes=[[750, 75, 1800, 1040], [750, 75, 1800, 1040]],
-        bbox_fmt=BoundingBoxFormat.XYXY,
-        class_ids=[1, 1],
-        labels=['plate', 'plate'],
-    )
-    targets = [{'gt_proposal': proposal}]
-
-    x = m([im], targets=targets)
-    # x = m.build_image_prototypes(im, proposal)
-    print(x)

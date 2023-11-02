@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Type, Union
 
 import torch
 import torch.nn as nn
+from igniter.registry import model_registry
 from torchvision.ops import RoIAlign
 
 from fsl.structures import Instances
@@ -64,6 +65,7 @@ class TextFSOD(nn.Module):
         return self.mask_generator.device
 
 
+@model_registry('sam_clip_fsod')
 def build_text_fsod(
     sam_args: Dict[str, str],
     mask_gen_args: Dict[str, Any] = {},
@@ -74,16 +76,13 @@ def build_text_fsod(
     all_classes_fn: str = None,
     seen_classes_fn: str = None,
 ) -> TextFSOD:
-    from fsl.models.clip import CLIP
+    from fsl.models.clip import build_clip
+    from fsl.models.devit import build_devit
     from fsl.models.sam_relational import build_sam_auto_mask_generator
 
     mask_generator = build_sam_auto_mask_generator(sam_args, mask_gen_args)
-    text_encoder = CLIP(*clip_args)
+    text_encoder = build_clip(*clip_args)
     roi_pooler = RoIAlign(roi_pool_size, spatial_scale=1 / mask_generator.downsize, sampling_ratio=-1)
+    classifier = build_devit(prototype_file, background_prototype_file, all_classes_fn, seen_classes_fn)
 
-    return TextFSOD(
-        mask_generator,
-        text_encoder,
-        None,
-        roi_pooler,
-    )
+    return TextFSOD(mask_generator, text_encoder, classifier, roi_pooler)
