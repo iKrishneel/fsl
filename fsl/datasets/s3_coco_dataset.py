@@ -10,8 +10,8 @@ from typing import Any, Dict, List
 import numpy as np
 import torch
 import torchvision
-from PIL import Image
 from omegaconf import DictConfig, OmegaConf
+from PIL import Image
 
 torchvision.disable_beta_transforms_warning()
 
@@ -101,7 +101,7 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
 
         labels = list(labels)
         self.label_mapping = {labels[i]: i for i in range(len(labels))}
-        # self.instances_per_batch = kwargs.get('instances_per_batch', 10)
+        self.min_bbox_size = kwargs.get('min_bbox_size', 10)
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
         label_name_mapping = {v['id']: v['name'] for v in self.coco.dataset['categories']}
@@ -111,15 +111,29 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
                 iid = self.ids[index]
                 image, targets = self._load(iid)
                 assert len(targets) > 0
+
+                bboxes = [
+                    torch.Tensor(target['bbox'])
+                    for target in targets
+                    if np.all(np.array(target['bbox'][2:]) > self.min_bbox_size)
+                ]
+                assert len(bboxes) > 0
+
                 break
             except Exception as e:
                 logger.warning(f'{e} for iid: {iid} index: {index}')
                 index = np.random.choice(np.arange(len(self.ids)))
 
         # FIXME: Add targets transform parsing directly from config
-        category_ids = [target['category_id'] for target in targets]
-        bboxes = [torch.Tensor(target['bbox']) for target in targets]
-        category_names = [label_name_mapping[target['category_id']] for target in targets]
+        category_ids = [
+            target['category_id'] for target in targets if np.all(np.array(target['bbox'][2:]) > self.min_bbox_size)
+        ]
+        # bboxes = [torch.Tensor(target['bbox']) for target in targets if np.all(np.array(target['bbox'][2:]) > 10)]
+        category_names = [
+            label_name_mapping[target['category_id']]
+            for target in targets
+            if np.all(np.array(target['bbox'][2:]) > self.min_bbox_size)
+        ]
 
         assert len(bboxes) > 0, 'Empty bounding boxes'
 

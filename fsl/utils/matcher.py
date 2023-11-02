@@ -93,7 +93,7 @@ class Matcher(object):
             )
             return default_matches, default_match_labels
 
-        assert torch.all(match_quality_matrix >= 0)
+        assert torch.all(match_quality_matrix >= 0), f'Value is \n {match_quality_matrix}'
 
         # match_quality_matrix is M (gt) x N (predicted)
         # Max over gt elements (dim 0) to find best gt candidate for each prediction

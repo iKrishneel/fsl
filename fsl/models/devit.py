@@ -156,14 +156,14 @@ class DeVit(nn.Module):
         gt_instances = [target['gt_proposal'] for target in targets]
         gt_bboxes = [gt_proposal.to_tensor().bboxes for gt_proposal in gt_instances]
         noisy_proposals = utils.prepare_noisy_boxes(gt_bboxes, img_hw)
-        boxes = [torch.cat([gt_bboxes[i], noisy_proposals[i]]).to(self.device) for i in range(len(targets))]
+        # boxes = [torch.cat([gt_bboxes[i], noisy_proposals[i]]).to(self.device) for i in range(len(targets))]
+        boxes = [torch.cat([gt_bboxes[i]]).to(self.device) for i in range(len(targets))]
 
         # embedding of the images
         images = torch.stack(images).to(self.device) if isinstance(images[0], torch.Tensor) else images
         features = self.mask_generator(images)
 
-        class_labels, matched_gt_boxes, resampled_proposals = [], [], []
-        num_bg_samples, num_fg_samples, gt_masks = [], [], []
+        class_labels, resampled_proposals = [], []
         for i, (proposals_per_image, targets_per_image) in enumerate(zip(boxes, gt_instances)):
             targets_per_image = targets_per_image.to_tensor(self.device)
 
@@ -203,9 +203,6 @@ class DeVit(nn.Module):
             resampled_proposals.append(proposals_per_image)
             class_labels.append(class_labels_i)
 
-            num_bg_samples.append((class_labels_i == num_classes).sum().item())
-            num_fg_samples.append(class_labels_i.numel() - num_bg_samples[-1])
-
         class_labels = torch.cat(class_labels)
 
         rois = []
@@ -213,6 +210,14 @@ class DeVit(nn.Module):
             batch_index = torch.full((len(box), 1), fill_value=float(bid)).to(self.device)
             rois.append(torch.cat([batch_index, box.to(self.device)], dim=1))
         rois = torch.cat(rois)
+
+        """
+        with open("/tmp/bboxes.txt", "a") as f:
+            f.write(f"{self.device} {rois.shape[0]}\n")
+        n = 30
+        rois = rois[:n]
+        class_labels = class_labels[:n]
+        """
 
         roi_features = self.roi_pool(features, rois)  # N, C, k, k
 
@@ -248,6 +253,10 @@ class DeVit(nn.Module):
             num_active_classes,
         )
 
+        del roi_features
+        del features
+        del images
+
         # loss
         class_labels = class_labels.long().to(self.device)
         if sample_class_enabled:
@@ -273,6 +282,7 @@ class DeVit(nn.Module):
                 logits, class_labels, num_classes=num_active_classes, bg_weight=self.bg_cls_weight
             )
 
+        del logits
         # import IPython, sys; IPython.embed(header="Forward"); sys.exit()
         return loss_dict
 
@@ -328,7 +338,7 @@ class DeVit(nn.Module):
             full_scores[:, -1] = scores[:, -1]
             output['scores'] = full_scores[:, :-1]
 
-        import IPython, sys; IPython.embed(header="Forward Once"); sys.exit()
+        # import IPython, sys; IPython.embed(header="Forward Once"); sys.exit()
         return output, {'loss': 0.0}  # loss is not yet computed
 
     def get_logits(
@@ -428,8 +438,11 @@ class DeVit(nn.Module):
                 # N x (classes + 1)
                 logits = torch.cat([cls_logits, bg_logits], dim=1) / self.cls_temp
         else:
-            logits = [logit / self.cls_temp for logit in cls_logits] \
-                if isinstance(cls_logits, list) else cls_logits / self.cls_temp
+            logits = (
+                [logit / self.cls_temp for logit in cls_logits]
+                if isinstance(cls_logits, list)
+                else cls_logits / self.cls_temp
+            )
 
         return logits
 

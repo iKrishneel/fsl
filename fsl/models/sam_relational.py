@@ -12,8 +12,8 @@ from PIL import Image
 from segment_anything import SamAutomaticMaskGenerator as _SAMG
 from segment_anything import SamPredictor as _SamPredictor
 from segment_anything import sam_model_registry
-from torchvision.ops import RoIAlign
 from torchvision.datapoints import BoundingBoxFormat
+from torchvision.ops import RoIAlign
 
 from fsl.datasets.s3_coco_dataset import S3CocoDatasetSam
 from fsl.structures import Proposal
@@ -120,9 +120,9 @@ class SamPredictor(nn.Module, _SamPredictor):
             input_images = [
                 torch.as_tensor(self.transform.apply_image(image)).permute(2, 0, 1).contiguous() for image in images
             ]
-            images = torch.stack(
-                [self.model.preprocess(image.to(self.device)) for image in input_images]
-            ).to(self.device)
+            images = torch.stack([self.model.preprocess(image.to(self.device)) for image in input_images]).to(
+                self.device
+            )
 
         self.model.image_encoder.to(self.device)
         return self.model.image_encoder(images)
