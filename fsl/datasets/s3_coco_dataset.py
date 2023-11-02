@@ -90,17 +90,6 @@ class S3CocoDatasetSam(S3CocoDataset):
 class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
     def __init__(self, *args, **kwargs):
         super(S3CocoDatasetFSLEpisode, self).__init__(*args, **kwargs)
-
-        # remap ids
-        labels = set()
-        for iid in self.ids:
-            targets = self.coco.loadAnns(self.coco.getAnnIds(iid))
-            for target in targets:
-                cat_id = target['category_id']
-                labels.add(cat_id)
-
-        labels = list(labels)
-        self.label_mapping = {labels[i]: i for i in range(len(labels))}
         self.min_bbox_size = kwargs.get('min_bbox_size', 10)
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
@@ -110,19 +99,20 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
             try:
                 iid = self.ids[index]
                 image, targets = self._load(iid)
-                assert len(targets) > 0
+                assert len(targets) > 0, 'No target(s) found!'
 
                 bboxes = [
                     torch.Tensor(target['bbox'])
                     for target in targets
                     if np.all(np.array(target['bbox'][2:]) > self.min_bbox_size)
                 ]
-                assert len(bboxes) > 0
+                assert len(bboxes) > 0, 'No bounding box found!'
 
                 break
             except Exception as e:
-                logger.warning(f'{e} for iid: {iid} index: {index}')
                 index = np.random.choice(np.arange(len(self.ids)))
+                if not isinstance(e, AssertionError):
+                    logger.warning(f'{e} for iid: {iid} index: {index}')
 
         # FIXME: Add targets transform parsing directly from config
         category_ids = [

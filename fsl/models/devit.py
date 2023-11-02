@@ -156,8 +156,8 @@ class DeVit(nn.Module):
         gt_instances = [target['gt_proposal'] for target in targets]
         gt_bboxes = [gt_proposal.to_tensor().bboxes for gt_proposal in gt_instances]
         noisy_proposals = utils.prepare_noisy_boxes(gt_bboxes, img_hw)
-        # boxes = [torch.cat([gt_bboxes[i], noisy_proposals[i]]).to(self.device) for i in range(len(targets))]
-        boxes = [torch.cat([gt_bboxes[i]]).to(self.device) for i in range(len(targets))]
+        boxes = [torch.cat([gt_bboxes[i], noisy_proposals[i]]).to(self.device) for i in range(len(targets))]
+        # boxes = [torch.cat([gt_bboxes[i]]).to(self.device) for i in range(len(targets))]
 
         # embedding of the images
         images = torch.stack(images).to(self.device) if isinstance(images[0], torch.Tensor) else images
@@ -211,14 +211,6 @@ class DeVit(nn.Module):
             rois.append(torch.cat([batch_index, box.to(self.device)], dim=1))
         rois = torch.cat(rois)
 
-        """
-        with open("/tmp/bboxes.txt", "a") as f:
-            f.write(f"{self.device} {rois.shape[0]}\n")
-        n = 30
-        rois = rois[:n]
-        class_labels = class_labels[:n]
-        """
-
         roi_features = self.roi_pool(features, rois)  # N, C, k, k
 
         # sample topk classes
@@ -271,16 +263,19 @@ class DeVit(nn.Module):
             class_labels = class_labels[indices]
             logits = [logit[indices] for logit in logits]
 
-        loss_dict = {}
         if isinstance(logits, list):
-            for i, logit in enumerate(logits):
-                loss_dict[f'focal_loss_{i}'] = self.focal_loss(
+            loss_dict = {
+                f'focal_loss_{i}': self.focal_loss(
                     logit, class_labels, num_classes=num_active_classes, bg_weight=self.bg_cls_weight
                 )
+                for i, logit in enumerate(logits)
+            }
         else:
-            loss_dict['focal_loss'] = self.focal_loss(
-                logits, class_labels, num_classes=num_active_classes, bg_weight=self.bg_cls_weight
-            )
+            loss_dict = {
+                'focal_loss': self.focal_loss(
+                    logits, class_labels, num_classes=num_active_classes, bg_weight=self.bg_cls_weight
+                )
+            }
 
         del logits
         # import IPython, sys; IPython.embed(header="Forward"); sys.exit()
@@ -458,10 +453,12 @@ class DeVit(nn.Module):
     def get_proposals(self, images: List[_Image]) -> List[Instances]:
         return [self.mask_generator.get_proposals(image) for image in images]
 
-    def interpolate(self, seq, x, mode='linear', force=False) -> _Tensor:
-        return nn.functional.interpolate(seq, x, mode=mode) if (seq.shape[-1] < x) or force else seq[:, :, -x:]
+    def interpolate(self, seq: _Tensor, size: int, mode: str = 'linear', force: bool = False) -> _Tensor:
+        return nn.functional.interpolate(seq, size, mode=mode) if (seq.shape[-1] < size) or force else seq[:, :, -size:]
 
-    def distance_embed(self, x, temperature=10000, num_pos_feats=128, scale=10.0) -> _Tensor:
+    def distance_embed(
+        self, x: _Tensor, temperature: int = 10000, num_pos_feats: int = 128, scale: float = 10.0
+    ) -> _Tensor:
         # x: [bs, n_dist]
         x = x[..., None]
         scale = 2 * torch.pi * scale
@@ -471,7 +468,15 @@ class DeVit(nn.Module):
         emb = torch.stack((sin_x[:, :, 0::2].sin(), sin_x[:, :, 1::2].cos()), dim=3).flatten(2)
         return emb  # [bs, n_dist, n_emb]
 
-    def focal_loss(self, inputs, targets, gamma=0.5, reduction='mean', bg_weight=0.0, num_classes=None):
+    def focal_loss(
+        self,
+        inputs: _Tensor,
+        targets: _Tensor,
+        gamma: int = 0.5,
+        reduction: str = 'mean',
+        bg_weight: float = 0.0,
+        num_classes: List[int] = None,
+    ):
         """Inspired by RetinaNet implementation"""
         if targets.numel() == 0 and reduction == "mean":
             return input.sum() * 0.0  # connect the gradient
@@ -539,8 +544,6 @@ def devit_sam(
     all_classes_fn: str = None,
     seen_classes_fn: str = None,
 ) -> DeVit:
-    import pickle
-
     from fsl.models.sam_relational import build_sam_auto_mask_generator
 
     mask_generator = build_sam_auto_mask_generator(sam_args, mask_gen_args)
@@ -571,8 +574,8 @@ def devit_dinov2(
             self.backbone = backbone.eval()
 
         @torch.no_grad()
-        def forward(self, x: _Tensor) -> _Tensor:
-            outputs = self.backbone.get_intermediate_layers(x, n=[self.backbone.n_blocks - 1], reshape=True)
+        def forward(self, image: _Tensor) -> _Tensor:
+            outputs = self.backbone.get_intermediate_layers(image, n=[self.backbone.n_blocks - 1], reshape=True)
             return outputs[0]
 
         @property
