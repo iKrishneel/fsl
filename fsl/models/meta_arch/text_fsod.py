@@ -31,7 +31,10 @@ class TextFSOD(nn.Module):
     ) -> _Tensor:
         # TODO: the gt_bboxes can contain noisy bboxes so add the labels
         roi_features = self.roi_pooler(im_embeddings, gt_bboxes)
-        roi_features = roi_features.flatten(2).mean(2)
+        # roi_features = roi_features.flatten(2).mean(2)
+        text_embeddings = nn.functional.interpolate(
+            text_embeddings[:, :, None, None], roi_features.shape[2:], mode='nearest', align_corners=True
+        )
         roi_features = torch.cat([roi_features, text_embeddings], dim=1)
         return roi_features
 

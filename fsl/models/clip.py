@@ -39,12 +39,16 @@ class CLIP(nn.Module):
     @torch.no_grad()
     def get_text_embedding(self, texts: Union[str, List[str]], is_normalized: bool = True) -> _Tensor:
         text_tokens = clip.tokenize(texts).to(self.device)
-        text_embeddings = self.clip.forward_text(text_tokens)
+        text_embeddings = self.forward_text(text_tokens)
         return normalize(text_embeddings) if is_normalized else text_embeddings
 
     @property
     def device(self) -> torch.device:
-        return self.clip_model.visual.conv1.weight.device
+        if getattr(self.clip_model, 'visual', None):
+            layer = self.clip_model.visual.conv1
+        else:
+            layer = self.clip_model.transformer.resblocks[0].attn.out_proj
+        return layer.weight.device
 
     @staticmethod
     def get_clip_model(name: str, remove_keys: List[str] = []) -> Tuple[clip.model.CLIP, Compose]:
