@@ -115,9 +115,9 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
                     logger.warning(f'{e} for iid: {iid} index: {index}')
 
         # FIXME: Add targets transform parsing directly from config
-        category_ids = [
-            target['category_id'] for target in targets if np.all(np.array(target['bbox'][2:]) > self.min_bbox_size)
-        ]
+        category_ids = torch.IntTensor(
+            [target['category_id'] for target in targets if np.all(np.array(target['bbox'][2:]) > self.min_bbox_size)]
+        )
         # bboxes = [torch.Tensor(target['bbox']) for target in targets if np.all(np.array(target['bbox'][2:]) > 10)]
         category_names = [
             label_name_mapping[target['category_id']]
@@ -130,16 +130,18 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
         if image.mode != 'RBG':
             image = image.convert('RGB')
 
-        for transform in self.transforms.transforms:
-            image, bboxes = transform(image, bboxes)
-
-        return {
+        data = {
             'image': image,
             'bboxes': bboxes,
             'category_ids': category_ids,
             'category_names': category_names,
             'image_ids': [iid],
         }
+
+        data = self.transforms(data)
+
+        # import IPython, sys; IPython.embed(); sys.exit()
+        return data
 
 
 @dataset_registry('fs_coco')

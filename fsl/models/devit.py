@@ -13,10 +13,12 @@ from torchvision.ops.boxes import box_area, box_iou
 
 from fsl.datasets import utils
 from fsl.structures import Instances
+from fsl.utils.matcher import Matcher
 from fsl.utils.prototypes import ProtoTypes
 
 _Image = Type[Image.Image]
 _Tensor = Type[torch.Tensor]
+_Module = Type[nn.Module]
 
 
 class PropagateNet(nn.Module):
@@ -80,21 +82,15 @@ class PropagateNet(nn.Module):
         return results if self.training else results[-1]
 
 
-class DeVit(nn.Module):
+class DeVit2(nn.Module):
     def __init__(
         self,
-        mask_generator,
-        proposal_matcher,
-        roi_pool_size: int = 16,
         fg_prototypes: ProtoTypes = None,
         bg_prototypes: ProtoTypes = None,
         all_cids: List[str] = None,
         seen_cids: List[str] = None,
     ):
-        super(DeVit, self).__init__()
-        self.mask_generator = mask_generator
-        self.proposal_matcher = proposal_matcher
-        self.roi_pool = RoIAlign(roi_pool_size, spatial_scale=1 / mask_generator.downsize, sampling_ratio=-1)
+        super(DeVit2, self).__init__()
 
         # TODO: Configure this
         self.batch_size_per_image = 128
@@ -107,6 +103,7 @@ class DeVit(nn.Module):
         self.cls_temp = 0.1
         self.hidden_dim = 256
         self.num_cls_layers = 3
+        self.use_noisy_bboxes = False
 
         cls_input_dim = self.temb * 2
 
@@ -144,74 +141,11 @@ class DeVit(nn.Module):
             self.register_buffer('train_class_weight', pt.normalized_embedding[torch.as_tensor(train_class_order)])
             self.register_buffer('test_class_weight', pt.normalized_embedding[torch.as_tensor(test_class_order)])
 
-    def forward(self, images: List[_Tensor], targets: List[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def forward(self, roi_features: _Tensor, class_labels: _Tensor = None) -> Dict[str, Any]:
         if not self.training:
-            return self.forward_once(images, targets)
+            return self.forward_once(roi_features)
 
         num_classes = len(self.train_class_weight)
-        assert targets is not None and len(targets) == len(images)
-
-        # proposals
-        img_hw = images[0].shape[1:] if isinstance(images[0], torch.Tensor) else images[0].size[::-1]
-        gt_instances = [target['gt_proposal'] for target in targets]
-        gt_bboxes = [gt_proposal.to_tensor().bboxes for gt_proposal in gt_instances]
-        noisy_proposals = utils.prepare_noisy_boxes(gt_bboxes, img_hw)
-        boxes = [torch.cat([gt_bboxes[i], noisy_proposals[i]]).to(self.device) for i in range(len(targets))]
-        # boxes = [torch.cat([gt_bboxes[i]]).to(self.device) for i in range(len(targets))]
-
-        # embedding of the images
-        images = torch.stack(images).to(self.device) if isinstance(images[0], torch.Tensor) else images
-        features = self.mask_generator(images)
-
-        class_labels, resampled_proposals = [], []
-        for i, (proposals_per_image, targets_per_image) in enumerate(zip(boxes, gt_instances)):
-            targets_per_image = targets_per_image.to_tensor(self.device)
-
-            match_quality_matrix = box_iou(targets_per_image.bboxes, proposals_per_image)
-            matched_idxs, matched_labels = self.proposal_matcher(match_quality_matrix)
-
-            class_labels_i = targets_per_image.class_ids[matched_idxs]
-
-            if len(class_labels_i) == 0:
-                # no annotation on this image
-                assert torch.all(matched_labels == 0)
-                class_labels_i = torch.zeros_like(matched_idxs)
-
-            class_labels_i[matched_labels == 0] = num_classes
-            class_labels_i[matched_labels == -1] = -1
-
-            positive = ((class_labels_i != -1) & (class_labels_i != num_classes)).nonzero().flatten()
-            negative = (class_labels_i == num_classes).nonzero().flatten()
-
-            batch_size_per_image = self.batch_size_per_image  # 512
-            num_pos = int(batch_size_per_image * self.pos_ratio)
-            # protect against not enough positive examples
-            num_pos = min(positive.numel(), num_pos)
-            num_neg = batch_size_per_image - num_pos
-            # protect against not enough negative examples
-            num_neg = min(negative.numel(), num_neg)
-
-            perm1 = torch.randperm(positive.numel())[:num_pos]
-            perm2 = torch.randperm(negative.numel())[:num_neg]
-            pos_idx = positive[perm1]
-            neg_idx = negative[perm2]
-            sampled_idxs = torch.cat([pos_idx, neg_idx], dim=0)
-
-            proposals_per_image = proposals_per_image[sampled_idxs]
-            class_labels_i = class_labels_i[sampled_idxs]
-
-            resampled_proposals.append(proposals_per_image)
-            class_labels.append(class_labels_i)
-
-        class_labels = torch.cat(class_labels)
-
-        rois = []
-        for bid, box in enumerate(resampled_proposals):
-            batch_index = torch.full((len(box), 1), fill_value=float(bid)).to(self.device)
-            rois.append(torch.cat([batch_index, box.to(self.device)], dim=1))
-        rois = torch.cat(rois)
-
-        roi_features = self.roi_pool(features, rois)  # N, C, k, k
 
         # sample topk classes
         class_topk = self.num_sample_class if self.num_sample_class > 0 else num_classes
@@ -232,6 +166,7 @@ class DeVit(nn.Module):
                 else:
                     curr_indices = torch.cat([torch.as_tensor([curr_label]), topk_class_indices_i[:-1]])
                 class_indices.append(curr_indices)
+
             class_indices = torch.stack(class_indices).to(self.device)
             class_indices = torch.sort(class_indices, dim=1).values
 
@@ -244,10 +179,6 @@ class DeVit(nn.Module):
             num_classes,
             num_active_classes,
         )
-
-        del roi_features
-        del features
-        del images
 
         # loss
         class_labels = class_labels.long().to(self.device)
@@ -282,24 +213,8 @@ class DeVit(nn.Module):
         return loss_dict
 
     @torch.no_grad()
-    def forward_once(self, images: List[_Tensor], targets: List[Dict[str, Any]] = None) -> Dict[str, Any]:
-        if targets and 'gt_proposal' in targets[0]:
-            proposals = [target['gt_proposal'] for target in targets]
-        else:
-            proposals = self.get_proposals(images)
-
-        assert len(proposals) == 1
-
-        # class_weights = self.test_class_weight
+    def forward_once(self, roi_features: _Tensor, class_labels: _Tensor = None) -> Dict[str, Any]:
         num_classes = len(self.test_class_weight)
-
-        bboxes = torch.cat([proposal.to_tensor().bboxes.to(self.device) for proposal in proposals])
-        rois = torch.cat([torch.full((len(bboxes), 1), fill_value=0).to(self.device), bboxes], dim=1)
-
-        images = torch.stack(images).to(self.device)
-        features = self.mask_generator(images)
-
-        roi_features = self.roi_pool(features, rois)  # N, C, k, k
 
         # sample topk classes
         class_topk = self.num_sample_class if self.num_sample_class > 0 else num_classes
@@ -333,7 +248,22 @@ class DeVit(nn.Module):
             full_scores[:, -1] = scores[:, -1]
             output['scores'] = full_scores[:, :-1]
 
-        # import IPython, sys; IPython.embed(header="Forward Once"); sys.exit()
+        y_true = sorted(targets[0]['gt_proposal'].labels)
+
+        with open('../data/coco/all_classes.txt', 'r') as f:
+            lines = np.array([l.rstrip() for l in f.readlines()])
+
+        indices = torch.argmax(full_scores, dim=1).cpu().numpy()
+        y_pred = sorted(list(lines[indices]))
+
+        print(y_pred, y_true)
+
+        import sys
+
+        import IPython
+
+        IPython.embed(header="Forward Once")
+        sys.exit()
         return output, {'loss': 0.0}  # loss is not yet computed
 
     def get_logits(
@@ -441,18 +371,6 @@ class DeVit(nn.Module):
 
         return logits
 
-    @torch.no_grad()
-    def build_image_prototypes(self, image: _Image, instances: Instances) -> ProtoTypes:
-        features = self.mask_generator([image])
-        instances = instances.to_tensor(features.device)
-        roi_feats = self.roi_pool(features, [instances.bboxes])
-        index = 2 if len(roi_feats.shape) == 4 else 1
-        roi_feats = roi_feats.flatten(index).mean(index)
-        return ProtoTypes(embeddings=roi_feats, labels=instances.labels, instances=instances)
-
-    def get_proposals(self, images: List[_Image]) -> List[Instances]:
-        return [self.mask_generator.get_proposals(image) for image in images]
-
     def interpolate(self, seq: _Tensor, size: int, mode: str = 'linear', force: bool = False) -> _Tensor:
         return nn.functional.interpolate(seq, size, mode=mode) if (seq.shape[-1] < size) or force else seq[:, :, -size:]
 
@@ -505,6 +423,134 @@ class DeVit(nn.Module):
         return self.fc_other_class.weight.device
 
 
+class DeVit(DeVit2):
+    def __init__(
+        self,
+        mask_generator: _Module,
+        proposal_matcher: Matcher,
+        roi_pool_size: int = 16,
+        fg_prototypes: ProtoTypes = None,
+        bg_prototypes: ProtoTypes = None,
+        all_cids: List[str] = None,
+        seen_cids: List[str] = None,
+    ):
+        super(DeVit, self).__init__(fg_prototypes, bg_prototypes, all_cids, seen_cids)
+        self.mask_generator = mask_generator
+        self.proposal_matcher = proposal_matcher
+        self.roi_pool = RoIAlign(roi_pool_size, spatial_scale=1 / mask_generator.downsize, sampling_ratio=-1)
+
+    def sample_noisy_rois(self, images: List[_Tensor], targets: List[Dict[str, Any]]) -> Tuple[List, _Tensor]:
+        num_classes = len(self.train_class_weight)
+        img_hw = images[0].shape[1:] if isinstance(images[0], torch.Tensor) else images[0].size[::-1]
+        gt_instances = [target['gt_proposal'] for target in targets]
+        gt_bboxes = [gt_proposal.to_tensor().bboxes for gt_proposal in gt_instances]
+
+        if self.use_noisy_bboxes:
+            noisy_proposals = utils.prepare_noisy_boxes(gt_bboxes, img_hw)
+            boxes = [torch.cat([gt_bboxes[i], noisy_proposals[i]]).to(self.device) for i in range(len(targets))]
+        else:
+            boxes = [torch.cat([gt_bboxes[i]]).to(self.device) for i in range(len(targets))]
+
+        class_labels, resampled_proposals = [], []
+        for i, (proposals_per_image, targets_per_image) in enumerate(zip(boxes, gt_instances)):
+            targets_per_image = targets_per_image.to_tensor(self.device)
+
+            match_quality_matrix = box_iou(targets_per_image.bboxes, proposals_per_image)
+            matched_idxs, matched_labels = self.proposal_matcher(match_quality_matrix)
+
+            class_labels_i = targets_per_image.class_ids[matched_idxs]
+
+            if len(class_labels_i) == 0:
+                # no annotation on this image
+                assert torch.all(matched_labels == 0)
+                class_labels_i = torch.zeros_like(matched_idxs)
+
+            class_labels_i[matched_labels == 0] = num_classes
+            class_labels_i[matched_labels == -1] = -1
+
+            positive = ((class_labels_i != -1) & (class_labels_i != num_classes)).nonzero().flatten()
+            negative = (class_labels_i == num_classes).nonzero().flatten()
+
+            batch_size_per_image = self.batch_size_per_image  # 512
+            num_pos = int(batch_size_per_image * self.pos_ratio)
+            # protect against not enough positive examples
+            num_pos = min(positive.numel(), num_pos)
+            num_neg = batch_size_per_image - num_pos
+            # protect against not enough negative examples
+            num_neg = min(negative.numel(), num_neg)
+
+            perm1 = torch.randperm(positive.numel())[:num_pos]
+            perm2 = torch.randperm(negative.numel())[:num_neg]
+            pos_idx = positive[perm1]
+            neg_idx = negative[perm2]
+            sampled_idxs = torch.cat([pos_idx, neg_idx], dim=0)
+
+            proposals_per_image = proposals_per_image[sampled_idxs]
+            class_labels_i = class_labels_i[sampled_idxs]
+
+            resampled_proposals.append(proposals_per_image)
+            class_labels.append(class_labels_i)
+
+        class_labels = torch.cat(class_labels)
+        return resampled_proposals, class_labels
+
+    def forward(self, images: List[_Tensor], targets: List[Dict[str, Any]] = None) -> Dict[str, Any]:
+        if not self.training:
+            return self.forward_once(images, targets)
+
+        num_classes = len(self.train_class_weight)
+        assert targets is not None and len(targets) == len(images)
+
+        # proposals
+        resampled_proposals, class_labels = self.sample_noisy_rois(images, targets)
+
+        rois = []
+        for bid, box in enumerate(resampled_proposals):
+            batch_index = torch.full((len(box), 1), fill_value=float(bid)).to(self.device)
+            rois.append(torch.cat([batch_index, box.to(self.device)], dim=1))
+        rois = torch.cat(rois)
+
+        # embedding of the images
+        images = torch.stack(images).to(self.device) if isinstance(images[0], torch.Tensor) else images
+        features = self.mask_generator(images)
+        roi_features = self.roi_pool(features, rois)  # N, C, k, k
+
+        return super().forward(roi_features, class_labels)
+
+    @torch.no_grad()
+    def forward_once(self, images: List[_Tensor], targets: List[Dict[str, Any]] = None) -> Dict[str, Any]:
+        if targets and 'gt_proposal' in targets[0]:
+            proposals = [target['gt_proposal'] for target in targets]
+        else:
+            proposals = self.get_proposals(images)
+
+        assert len(proposals) == 1
+
+        num_classes = len(self.test_class_weight)
+
+        bboxes = torch.cat([proposal.to_tensor().bboxes.to(self.device) for proposal in proposals])
+        rois = torch.cat([torch.full((len(bboxes), 1), fill_value=0).to(self.device), bboxes], dim=1)
+
+        images = torch.stack(images).to(self.device)
+        features = self.mask_generator(images)
+
+        roi_features = self.roi_pool(features, rois)  # N, C, k, k
+
+        return super().forward_once(roi_features)
+
+    @torch.no_grad()
+    def build_image_prototypes(self, image: _Image, instances: Instances) -> ProtoTypes:
+        features = self.mask_generator([image])
+        instances = instances.to_tensor(features.device)
+        roi_feats = self.roi_pool(features, [instances.bboxes])
+        index = 2 if len(roi_feats.shape) == 4 else 1
+        roi_feats = roi_feats.flatten(index).mean(index)
+        return ProtoTypes(embeddings=roi_feats, labels=instances.labels, instances=instances)
+
+    def get_proposals(self, images: List[_Image]) -> List[Instances]:
+        return [self.mask_generator.get_proposals(image) for image in images]
+
+
 def read_text_file(filename: str) -> List[str]:
     with open(filename, 'r') as txt_file:
         lines = txt_file.readlines()
@@ -519,8 +565,6 @@ def build_devit(
     all_classes_fn: str = None,
     seen_classes_fn: str = None,
 ) -> DeVit:
-    from fsl.utils.matcher import Matcher
-
     proposal_matcher = Matcher([0.3, 0.7], [0, -1, 1])
 
     if all_classes_fn and seen_classes_fn and prototype_file:
