@@ -2,12 +2,11 @@
 
 import os
 import pickle
-from typing import Any, Callable, Dict, List, Type
+from typing import Any, Callable, Dict, Type
 
 import torch
 from igniter.engine import EvaluationEngine
 from igniter.registry import engine_registry, event_registry, func_registry, io_registry
-from omegaconf import DictConfig
 from PIL import Image
 
 from fsl.structures import Instances
@@ -54,7 +53,11 @@ def collate_and_write(filename: str) -> None:
     p_files = sorted(os.listdir(root))
     prototypes = None
     for i, p_file in enumerate(p_files):
-        pt = _load_pickle(os.path.join(root, p_file))
+        fn = os.path.join(root, p_file)
+        if not os.path.isfile(fn) or 'pkl' not in fn:
+            print("not valid ", fn)
+            continue
+        pt = _load_pickle(fn)
         prototypes = pt if i == 0 else prototypes + pt
 
     average_embeddings = {}
@@ -89,11 +92,11 @@ if __name__ == '__main__':
     from omegaconf import OmegaConf
 
     from fsl.datasets.s3_coco_dataset import collate_data  # NOQA
-    from fsl.models.devit import devit  # NOQA
+    from fsl.models.devit import devit_sam  # NOQA
 
     logger.setLevel(logging.INFO)
 
     cfg = OmegaConf.load('../../configs/devit/prototypes.yaml')
 
-    engine = build_engine(cfg, mode='val')
+    engine = build_engine(cfg)
     engine()

@@ -34,6 +34,9 @@ transforms:
       size: 1024
     PadToSize:
       size: 1024
+    Normalize:
+      mean: [0.48145466, 0.4578275, 0.40821073]
+      std: [0.26862954, 0.26130258, 0.27577711]
 
 io:
   file_io:
@@ -41,6 +44,7 @@ io:
     root: "/root/krishneel/Downloads/fsl/prototypes/"
 
 build:
+  mode: "val"
   devit_sam:
     dataset: "fs_coco"
     val:

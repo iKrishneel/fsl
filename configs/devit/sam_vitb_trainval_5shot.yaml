@@ -13,7 +13,7 @@ distributed:
     init_method: tcp://127.0.0.1:23456
 
 models:
-  devit_sam:
+  sam_fsod:
     sam_args:
       model: vit_b
     all_classes_fn: "../data/coco/all_classes.txt"
@@ -79,7 +79,7 @@ io:
     root: "perception/models/fsl/sam_vitb_coco17_5shot/"
 
 build:
-  devit_sam:
+  sam_fsod:
     dataset: "coco"
     train:
       solver: "SGD"
@@ -89,4 +89,4 @@ build:
       func: "default_val_forward"
       transforms: "val"
 
-  model: "devit_sam"
+  model: "sam_fsod"

@@ -50,7 +50,7 @@ class SamPredictor(nn.Module, _SamPredictor):
             )
 
         self.model.image_encoder.to(self.device)
-        return self.model.image_encoder(images)
+        return self.model.image_encoder(images.to(self.device))
 
     @property
     def img_size(self) -> List[int]:

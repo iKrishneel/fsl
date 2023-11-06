@@ -237,18 +237,18 @@ class S3CocoDatasetFS(S3CocoDataset):
 
         assert len(bboxes) > 0, 'Empty bounding boxes'
 
-        if self.transforms is not None:
-            for transform in self.transforms.transforms:
-                image, bboxes = transform(image, bboxes)
-
-        return {
+        data = {
             'image': image,
             'bboxes': bboxes,
             'category_ids': category_ids,
             'image_ids': image_ids,
             'category_names': category_names,
         }
-
+        
+        if self.transforms is not None:
+            data = self.transforms(data)
+            
+        return data
 
 def load_coco(json_file):
     from pycocotools.coco import COCO
