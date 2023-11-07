@@ -36,12 +36,13 @@ class FSOD(nn.Module):
         gt_bboxes = [gt_proposal.to_tensor().bboxes.to(self.device) for gt_proposal in gt_instances]
         class_labels = torch.cat([instance.class_ids for instance in gt_instances])
 
+        class_labels[class_labels == -1] = self.classifier.train_class_weight.shape[0]
+
         im_embeddings = self.mask_generator(images)
 
         roi_features = self.forward_feature(im_embeddings, gt_bboxes)
         loss_dict = self.classifier(roi_features, class_labels)
 
-        breakpoint()
         return loss_dict
 
     @torch.no_grad()

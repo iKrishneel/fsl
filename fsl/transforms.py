@@ -243,7 +243,7 @@ class ArgumentNoisyBBoxes(object):
         class_labels = class_labels[sampled_idxs]
 
         mapping = {int(class_ids[i]): names[i] for i in range(len(class_ids))}
-        mapping[0] = 'background'
+        mapping[self.background_id] = 'background'
         names = [mapping[int(i)] for i in class_labels]
 
         data['image'] = image

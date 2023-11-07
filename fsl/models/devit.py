@@ -274,7 +274,6 @@ class DeVit(nn.Module):
         roi_features = roi_features.flatten(2) if len(roi_features.shape) == 4 else roi_features
         feats = roi_features.transpose(-2, -1) @ class_weights.T
         bs, spatial_size = roi_features.shape[0], roi_features.shape[-1]
-        # roi_pool_size = [self.roi_pool.output_size] * 2
         hw = np.sqrt(spatial_size)
         assert hw.is_integer(), 'Only square roi shape is support!'
         roi_pool_size = [int(hw), int(hw)]
