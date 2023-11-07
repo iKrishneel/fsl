@@ -18,7 +18,7 @@ models:
       model: vit_b
     all_classes_fn: "../data/coco/all_classes.txt"
     seen_classes_fn: "../data/coco/seen_classes.txt"
-    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_sam/fs_coco_trainval_novel_5shot.pkl"
+    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_sam/fs_coco_trainval_novel_30shot.pkl"
     background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_sam/background/panoptic_train2017_only_stuffs.pkl"
 
 datasets:
@@ -77,7 +77,7 @@ io:
   checkpoint:
     engine: 's3_writer'
     bucket_name: *bucket
-    root: "perception/models/fsl/sam_vitb_coco17_5shot/"
+    root: "perception/models/fsl/sam_vitb_coco17_30shot/"
 
 build:
   sam_fsod:

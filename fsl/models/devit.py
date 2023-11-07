@@ -536,7 +536,7 @@ class DeVitSam(DeVit):
 
     @torch.no_grad()
     def build_image_prototypes(self, image: _Tensor, instances: Instances) -> ProtoTypes:
-        features = self.mask_generator(image[None2])
+        features = self.mask_generator(image[None])
         instances = instances.to_tensor(features.device)
         roi_feats = self.roi_pool(features, [instances.bboxes])
         index = 2 if len(roi_feats.shape) == 4 else 1

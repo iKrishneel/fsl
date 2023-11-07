@@ -55,7 +55,6 @@ def collate_and_write(filename: str) -> None:
     for i, p_file in enumerate(p_files):
         fn = os.path.join(root, p_file)
         if not os.path.isfile(fn) or 'pkl' not in fn:
-            print("not valid ", fn)
             continue
         pt = _load_pickle(fn)
         prototypes = pt if i == 0 else prototypes + pt
@@ -96,7 +95,8 @@ if __name__ == '__main__':
 
     logger.setLevel(logging.INFO)
 
-    cfg = OmegaConf.load('../../configs/devit/prototypes.yaml')
+    # cfg = OmegaConf.load('../../configs/devit/prototypes/prototypes.yaml')
+    cfg = OmegaConf.load('../../configs/devit/prototypes/background_prototypes.yaml')
 
     engine = build_engine(cfg)
     engine()

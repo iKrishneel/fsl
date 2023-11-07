@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import time
 from typing import Any, Dict, List
 
@@ -150,10 +151,19 @@ class S3CocoDatasetFS(S3CocoDataset):
         bucket_name: str,
         root: str,
         json_file: str,
-        shot: int = 5,
+        # shot: int = 5,
         filename_signature: str = 'full_box_%sshot_%s_trainval.json',
         **kwargs,
     ) -> None:
+        json_filename = os.path.splitext(os.path.basename(json_file))[0]
+        if 'shot' in json_filename:
+            match = re.search(r'\d+shot', json_filename)
+            assert match
+            shot = int(json_filename[match.start() : match.end()].replace('shot', ''))
+        else:
+            shot = kwargs.get('shot', None)
+            assert shot
+
         split_dir = os.path.join(os.path.dirname(json_file), 'cocosplit2017/seed1')
         assert os.path.isdir(split_dir), f'Directory not found {split_dir}'
         anno_dict = load_json(json_file)
@@ -244,13 +254,14 @@ class S3CocoDatasetFS(S3CocoDataset):
             'image_ids': image_ids,
             'category_names': category_names,
         }
-        
+
         if self.transforms is not None:
             data = self.transforms(data)
-            
+
         return data
 
-def load_coco(json_file):
+
+def load_coco(json_file: str):
     from pycocotools.coco import COCO
 
     with contextlib.redirect_stdout(io.StringIO()):

@@ -40,6 +40,8 @@ class FSOD(nn.Module):
 
         roi_features = self.forward_feature(im_embeddings, gt_bboxes)
         loss_dict = self.classifier(roi_features, class_labels)
+
+        breakpoint()
         return loss_dict
 
     @torch.no_grad()
