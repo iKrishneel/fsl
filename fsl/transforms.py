@@ -64,6 +64,43 @@ class ResizeLongestSide(object):
 
 @transform_registry
 @dataclass
+class ResizeLongestSide2(object):
+    long_size: int
+    short_size: int
+
+    def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        image, bboxes = [data[key] for key in ['image', 'bboxes']]
+
+        image = Image.fromarray(image) if isinstance(image, np.ndarray) else image
+        img_hw = image.size[::-1]
+
+        target_size = self.get_preprocess_shape(*img_hw)
+        image = TF.resize(image, target_size)
+
+        if bboxes is not None:
+            bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=image.size[::-1])[0] for bbox in bboxes]
+
+        data['image'] = image
+        data['bboxes'] = bboxes
+        return data
+
+    def get_preprocess_shape(self, oldh: int, oldw: int) -> Tuple[int, int]:
+        """
+        Compute the output size given input size and target long side length.
+        """
+        scale_long = self.long_size * 1.0 / max(oldh, oldw)
+        scale_short = self.short_size * 1.0 / min(oldh, oldw)
+
+        newh = oldh * (scale_long if oldh > oldw else scale_short)
+        neww = oldw * (scale_short if oldh > oldw else scale_long)
+
+        neww = int(neww + 0.5)
+        newh = int(newh + 0.5)
+        return (newh, neww)
+
+
+@transform_registry
+@dataclass
 class Resize(object):
     size: Union[List[int], int]
 
@@ -198,17 +235,19 @@ class ArgumentNoisyBBoxes(object):
     batch_size_per_image: int = 128
 
     def __post_init__(self):
-        assert self.sample_size > 0
         self.proposal_matcher = Matcher(self.proposal_thresh, self.labels)
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        if self.sample_size <= 0:
+            return data
+
         image, gt_bboxes, class_ids, names = [
             data[key] for key in ['image', 'bboxes', 'category_ids', 'category_names']
         ]
 
         gt_bboxes = [gt_bbox.reshape(-1, 4) for gt_bbox in gt_bboxes]
         img_hw = image.shape[1:] if isinstance(image, torch.Tensor) else image.size[::-1]
-        noisy_bboxes = prepare_noisy_boxes(gt_bboxes, img_hw)
+        noisy_bboxes = prepare_noisy_boxes(gt_bboxes, img_hw, n=self.sample_size)
         bboxes = torch.cat([torch.cat([gt_bboxes[i], noisy_bboxes[i]]) for i in range(len(gt_bboxes))])
 
         match_quality_matrix = box_iou(torch.cat(gt_bboxes), bboxes)

@@ -42,7 +42,7 @@ def prototype_forward(engine, batch) -> None:
 
 
 @event_registry
-def collate_and_write(filename: str) -> None:
+def collate_and_write(engine, filename: str) -> None:
     root = engine._cfg.io.file_io.root
 
     def _load_pickle(filename: str) -> ProtoTypes:
@@ -54,7 +54,7 @@ def collate_and_write(filename: str) -> None:
     prototypes = None
     for i, p_file in enumerate(p_files):
         fn = os.path.join(root, p_file)
-        if not os.path.isfile(fn) or 'pkl' not in fn:
+        if not os.path.isfile(fn) or 'pkl' not in fn or filename in p_file:
             continue
         pt = _load_pickle(fn)
         prototypes = pt if i == 0 else prototypes + pt
@@ -84,19 +84,10 @@ class ProtoTypeEngine(EvaluationEngine):
 
 
 if __name__ == '__main__':
-    import logging
-
-    from igniter.builder import build_engine
-    from igniter.logger import logger
-    from omegaconf import OmegaConf
+    from igniter.main import initiate
 
     from fsl.datasets.s3_coco_dataset import collate_data  # NOQA
     from fsl.models.devit import devit_sam  # NOQA
 
-    logger.setLevel(logging.INFO)
-
-    # cfg = OmegaConf.load('../../configs/devit/prototypes/prototypes.yaml')
-    cfg = OmegaConf.load('../../configs/devit/prototypes/background_prototypes.yaml')
-
-    engine = build_engine(cfg)
-    engine()
+    # initiate('../../configs/devit/prototypes/prototypes.yaml')
+    initiate('../../configs/devit/prototypes/background_prototypes.yaml')

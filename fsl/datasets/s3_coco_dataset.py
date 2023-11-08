@@ -139,8 +139,6 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
         }
 
         data = self.transforms(data)
-
-        # import IPython, sys; IPython.embed(); sys.exit()
         return data
 
 

@@ -2,7 +2,7 @@ driver: torch
 device: "cuda"
 
 workdir:
-  path: "/tmp/fsl/sam_vitb_coco2017/"
+  path: "/tmp/fsl/resnet_vitb_coco2017/"
   unique: False
 
 distributed:
@@ -13,9 +13,7 @@ distributed:
     init_method: tcp://127.0.0.1:23456
 
 models:
-  sam_fsod:
-    sam_args:
-      model: vit_b
+  resnet_fsod:
     roi_pool_size: 7
     all_classes_fn: "../data/coco/all_classes.txt"
     seen_classes_fn: "../data/coco/seen_classes.txt"
@@ -46,12 +44,12 @@ transforms:
       old_fmt: "XYWH"
       new_fmt: "XYXY"
     VHFlip:
-      hflip: True
-      vflip: True
+      hflip: False
+      vflip: False
     ResizeLongestSide:
-      size: 1024
+      size: 800
     PadToSize:
-      size: 1024
+      size: 800
     ArgumentNoisyBBoxes:
       background_id: -1
     Normalize:
@@ -82,17 +80,17 @@ io:
   checkpoint:
     engine: 's3_writer'
     bucket_name: *bucket
-    root: "perception/models/fsl/sam_vitb_coco17_30shot/"
+    root: "perception/models/fsl/resnet_vitb_coco17_30shot/"
 
 build:
-  sam_fsod:
+  resnet_fsod:
     dataset: "coco"
     train:
       solver: "SGD"
       scheduler: "StepLR"
       epochs: 20
-    val:
-      func: "default_val_forward"
-      transforms: "val"
+    # val:
+    #   func: "default_val_forward"
+    #   transforms: "val"
 
-  model: "sam_fsod"
+  model: "resnet_fsod"

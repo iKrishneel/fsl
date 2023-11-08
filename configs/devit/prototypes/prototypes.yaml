@@ -2,9 +2,12 @@ driver: torch
 device: "cuda"
 
 models:
-  devit_sam:
+  sam_fsod:
     sam_args:
       model: "vit_b"
+    roi_pool_size: 7
+  resnet_fsod:
+    roi_pool_size: 7
 
 datasets:
   dataloader:
@@ -40,14 +43,16 @@ io:
 
 build:
   mode: "val"
-  devit_sam:
+  sam_fsod: &setup
     dataset: "fs_coco"
-    val:
+    val: &val
       func: "prototype_forward"
       transforms: "val"
       event_handlers:
-        - collate_and_write:
-            event_type: COMPLETED
-            filename: "fs_coco_trainval_novel_30shot.pkl"
+        collate_and_write:
+          event_type: COMPLETED
+          filename: "fs_coco_trainval_novel_30shot.pkl"
+  resnet_fsod:
+    <<: *setup
 
-  model: "devit_sam"
+  model: "sam_fsod"

@@ -109,19 +109,21 @@ class DeVit(nn.Module):
 
         if fg_prototypes:
             self._setup_prototypes(fg_prototypes, all_cids, seen_cids, is_bg=False)
+
+        self.bg_cls_weight = 0.0
+
         if bg_prototypes:
             self._setup_prototypes(bg_prototypes, all_cids, seen_cids, is_bg=True)
             self.bg_cls_weight = 0.2
             cls_input_dim += self.t_bg_emb
         else:
-            self.bg_tokens = None
-            self.fc_back_class = None
-            self.bg_cnn = None
-            self.bg_cls_weight = 0.0
+            self.bg_tokens, self.fc_back_class, self.bg_cnn = None, None, None
 
         self.fc_other_class = nn.Linear(self.t_len, self.temb)
         self.fc_intra_class = nn.Linear(self.t_pos_emb, self.temb)
         self.per_cls_cnn = PropagateNet(cls_input_dim, self.hidden_dim, num_layers=self.num_cls_layers)
+
+        self._all_cids = all_cids
 
     def _setup_prototypes(
         self, prototypes: ProtoTypes, all_cids: List[str] = None, seen_cids: List[str] = None, is_bg: bool = False
@@ -134,6 +136,13 @@ class DeVit(nn.Module):
             self.bg_cnn = PropagateNet(bg_input_dim, self.hidden_dim, num_layers=self.num_cls_layers)
         else:
             pt = prototypes.check(all_cids)
+            """
+            class_order = [pt.labels.index(c) for c in seen_cids] \
+                if self.training else [pt.labels.index(c) for c in all_cids]
+
+            assert -1 not in class_order
+            self.register_buffer('class_weight', pt.normalized_embedding[torch.as_tensor(class_order)])
+            """
             train_class_order = [pt.labels.index(c) for c in seen_cids]
             test_class_order = [pt.labels.index(c) for c in all_cids]
             assert -1 not in train_class_order and -1 not in test_class_order
@@ -248,15 +257,14 @@ class DeVit(nn.Module):
             full_scores[:, -1] = scores[:, -1]
             output['scores'] = full_scores[:, :-1]
 
+        """
         y_true = sorted(targets[0]['gt_proposal'].labels)
-
         with open('../data/coco/all_classes.txt', 'r') as f:
             lines = np.array([l.rstrip() for l in f.readlines()])
-
         indices = torch.argmax(full_scores, dim=1).cpu().numpy()
         y_pred = sorted(list(lines[indices]))
-
         print(y_pred, y_true)
+        """
 
         # import IPython, sys; IPython.embed(header="Forward Once")sys.exit()
         return output, {'loss': 0.0}  # loss is not yet computed
@@ -344,19 +352,19 @@ class DeVit(nn.Module):
         cls_logits = self.per_cls_cnn(per_cls_input)
 
         # N x classes
-        if isinstance(cls_logits, list):
-            cls_logits = [v.reshape(bs, num_active_classes) for v in cls_logits]
-        else:
-            cls_logits = cls_logits.reshape(bs, num_active_classes)
+        cls_logits = (
+            [v.reshape(bs, num_active_classes) for v in cls_logits]
+            if isinstance(cls_logits, list)
+            else cls_logits.reshape(bs, num_active_classes)
+        )
 
         if bg_logits is not None:
-            if isinstance(bg_logits, list):
-                logits = []
-                for c, b in zip(cls_logits, bg_logits):
-                    logits.append(torch.cat([c, b], dim=1) / self.cls_temp)
-            else:
-                # N x (classes + 1)
-                logits = torch.cat([cls_logits, bg_logits], dim=1) / self.cls_temp
+            logits = (
+                [torch.cat([c, b], dim=1) / self.cls_temp for c, b in zip(cls_logits, bg_logits)]
+                if isinstance(bg_logits, list)
+                else torch.cat([cls_logits, bg_logits], dim=1) / self.cls_temp
+            )
+            # N x (classes + 1)
         else:
             logits = (
                 [logit / self.cls_temp for logit in cls_logits]
@@ -521,7 +529,7 @@ class DeVitSam(DeVit):
 
         assert len(proposals) == 1
 
-        num_classes = len(self.test_class_weight)
+        # num_classes = len(self.test_class_weight)
 
         bboxes = torch.cat([proposal.to_tensor().bboxes.to(self.device) for proposal in proposals])
         rois = torch.cat([torch.full((len(bboxes), 1), fill_value=0).to(self.device), bboxes], dim=1)
