@@ -56,3 +56,8 @@ build:
     <<: *setup
 
   model: "sam_fsod"
+
+options:
+  train: False
+  eval: True
+

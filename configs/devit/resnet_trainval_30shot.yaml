@@ -89,8 +89,12 @@ build:
       solver: "SGD"
       scheduler: "StepLR"
       epochs: 20
-    # val:
-    #   func: "default_val_forward"
-    #   transforms: "val"
+    val:
+      func: "default_evaluation"
+      transforms: "val"
 
   model: "resnet_fsod"
+
+options:
+  train: True
+  eval: False

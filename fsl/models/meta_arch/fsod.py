@@ -113,6 +113,9 @@ def build_resnet_fsod(
     backbone.global_pool = nn.Identity()
     backbone.fc = nn.Identity()
 
+    for parameter in backbone.parameters():
+        parameter.requires_grad = False
+
     class Backbone(nn.Module):
         def __init__(self, backbone):
             super(Backbone, self).__init__()

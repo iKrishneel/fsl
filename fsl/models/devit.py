@@ -103,7 +103,6 @@ class DeVit(nn.Module):
         self.cls_temp = 0.1
         self.hidden_dim = 256
         self.num_cls_layers = 3
-        self.use_noisy_bboxes = False
 
         cls_input_dim = self.temb * 2
 
@@ -257,16 +256,6 @@ class DeVit(nn.Module):
             full_scores[:, -1] = scores[:, -1]
             output['scores'] = full_scores[:, :-1]
 
-        """
-        y_true = sorted(targets[0]['gt_proposal'].labels)
-        with open('../data/coco/all_classes.txt', 'r') as f:
-            lines = np.array([l.rstrip() for l in f.readlines()])
-        indices = torch.argmax(full_scores, dim=1).cpu().numpy()
-        y_pred = sorted(list(lines[indices]))
-        print(y_pred, y_true)
-        """
-
-        # import IPython, sys; IPython.embed(header="Forward Once")sys.exit()
         return output, {'loss': 0.0}  # loss is not yet computed
 
     def get_logits(
@@ -441,6 +430,7 @@ class DeVitSam(DeVit):
         self.mask_generator = mask_generator
         self.proposal_matcher = proposal_matcher
         self.roi_pool = RoIAlign(roi_pool_size, spatial_scale=1 / mask_generator.downsize, sampling_ratio=-1)
+        self.use_noisy_bboxes = False
 
     def sample_noisy_rois(self, images: List[_Tensor], targets: List[Dict[str, Any]]) -> Tuple[List, _Tensor]:
         num_classes = len(self.train_class_weight)
