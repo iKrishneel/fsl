@@ -19,8 +19,8 @@ models:
     roi_pool_size: 7
     all_classes_fn: "../data/coco/all_classes.txt"
     seen_classes_fn: "../data/coco/seen_classes.txt"
-    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_sam/fs_coco_trainval_novel_30shot.pkl"
-    background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_sam/background/panoptic_train2017_only_stuffs.pkl"
+    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_sam/sam_fsod/fg/fs_coco_trainval_novel_30shot.pkl"
+    background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_sam/sam_fsod/bg/panoptic_train2017_only_stuffs.pkl"
 
 datasets:
   dataloader:

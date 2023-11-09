@@ -8,6 +8,8 @@ models:
     roi_pool_size: 7
   resnet_fsod:
     roi_pool_size: 7
+  cie_fsod:
+    roi_pool_size: 7
 
 datasets:
   dataloader:
@@ -53,6 +55,8 @@ build:
           event_type: COMPLETED
           filename: "fs_coco_trainval_novel_30shot.pkl"
   resnet_fsod:
+    <<: *setup
+  cie_fsod:
     <<: *setup
 
   model: "sam_fsod"

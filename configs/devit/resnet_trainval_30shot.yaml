@@ -13,12 +13,14 @@ distributed:
     init_method: tcp://127.0.0.1:23456
 
 models:
-  resnet_fsod:
+  resnet_fsod: &model
     roi_pool_size: 7
     all_classes_fn: "../data/coco/all_classes.txt"
     seen_classes_fn: "../data/coco/seen_classes.txt"
     prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_sam/fs_coco_trainval_novel_30shot.pkl"
     background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_sam/background/panoptic_train2017_only_stuffs.pkl"
+  cie_fsod:
+    <<: *model
 
 datasets:
   dataloader:
@@ -83,7 +85,7 @@ io:
     root: "perception/models/fsl/resnet_vitb_coco17_30shot/"
 
 build:
-  resnet_fsod:
+  resnet_fsod: &build
     dataset: "coco"
     train:
       solver: "SGD"
@@ -92,6 +94,8 @@ build:
     val:
       func: "default_evaluation"
       transforms: "val"
+  cie_fsod:
+    <<: *build
 
   model: "resnet_fsod"
 

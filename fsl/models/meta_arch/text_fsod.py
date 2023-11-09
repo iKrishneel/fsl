@@ -8,11 +8,13 @@ from igniter.registry import model_registry
 from torchvision.ops import RoIAlign
 
 from fsl.structures import Instances
+from fsl.utils import ProtoTypes
+from .fsod import FSOD
 
 _Tensor = Type[torch.Tensor]
 
 
-class TextFSOD(nn.Module):
+class TextFSOD(FSOD):
     def __init__(
         self,
         mask_generator,
@@ -20,13 +22,10 @@ class TextFSOD(nn.Module):
         classifier,
         roi_pooler,
     ) -> None:
-        super(TextFSOD, self).__init__()
-        self.mask_generator = mask_generator
+        super(TextFSOD, self).__init__(mask_generator, classifier, roi_pooler)
         self.text_encoder = text_encoder
-        self.classifier = classifier
-        self.roi_pooler = roi_pooler
 
-    def forward_feature(
+    def forward_features(
         self, im_embeddings: _Tensor, text_embeddings: _Tensor, gt_bboxes: Union[_Tensor, List[_Tensor]]
     ) -> _Tensor:
         # TODO: the gt_bboxes can contain noisy bboxes so add the labels
@@ -51,7 +50,7 @@ class TextFSOD(nn.Module):
         text_embeddings = [self.text_encoder.get_text_embedding(names) for names in gt_names]
         im_embeddings = self.mask_generator(images)
 
-        roi_features = self.forward_feature(im_embeddings, text_embeddings, gt_bboxes)
+        roi_features = self.forward_features(im_embeddings, text_embeddings, gt_bboxes)
         loss_dict = self.classifier(roi_features)
 
         return loss_dict
@@ -63,10 +62,16 @@ class TextFSOD(nn.Module):
         rois = torch.cat([torch.full((len(bboxes), 1), fill_value=0).to(self.device), bboxes], dim=1)
         return self.classifier(self.mask_generator.predictor.features, rois)
 
-    @property
-    def device(self) -> torch.device:
-        return self.mask_generator.device
-
+    @torch.no_grad()
+    def build_image_prototypes(self, image: _Tensor, instances: Instances) -> ProtoTypes:
+        features = self.mask_generator(image[None])
+        instances = instances.to_tensor(self.device)
+        # roi_feats = self.roi_pooler(features, [instances.bboxes])
+        roi_feats = self.forward_features(features, [instances.bboxes])
+        index = 2 if len(roi_feats.shape) == 4 else 1
+        roi_feats = roi_feats.flatten(index).mean(index)
+        return ProtoTypes(embeddings=roi_feats, labels=instances.labels, instances=instances)
+    
 
 @model_registry('sam_clip_fsod')
 def build_text_fsod(
