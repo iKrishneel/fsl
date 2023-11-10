@@ -83,7 +83,7 @@ def _build_fsod(
     prototype_file: str = None,
     background_prototype_file: str = None,
     all_classes_fn: str = None,
-    seen_classes_fn: str = None,        
+    seen_classes_fn: str = None,
 ) -> FSOD:
     from fsl.models.devit import build_devit
 
