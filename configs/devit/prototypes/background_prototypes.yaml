@@ -10,6 +10,8 @@ models:
     roi_pool_size: 7
   cie_fsod:
     roi_pool_size: 7
+  dinov2_fsod:
+    roi_pool_size: 7
 
 datasets:
   dataloader:
@@ -31,9 +33,9 @@ transforms:
       old_fmt: "XYWH"
       new_fmt: "XYXY"
     ResizeLongestSide:
-      size: 1024
+      size: 896  # 1024
     PadToSize:
-      size: 1024
+      size: 896  # 1024
     Normalize:
       mean: [0.48145466, 0.4578275, 0.40821073]
       std: [0.26862954, 0.26130258, 0.27577711]
@@ -57,6 +59,8 @@ build:
   resnet_fsod:
     <<: *setup
   cie_fsod:
+    <<: *setup
+  dinov2_fsod:
     <<: *setup
 
   model: "sam_fsod"

@@ -64,7 +64,7 @@ class FSOD(nn.Module):
 
     @torch.no_grad()
     def build_image_prototypes(self, image: _Tensor, instances: Instances) -> ProtoTypes:
-        features = self.mask_generator(image[None])
+        features = self.mask_generator(image[None].to(self.device))
         instances = instances.to_tensor(self.device)
         # roi_feats = self.roi_pooler(features, [instances.bboxes])
         roi_feats = self.forward_features(features, [instances.bboxes])
@@ -249,19 +249,26 @@ def build_dinov2_fsod(
 
         @torch.no_grad()
         def forward(self, image: _Tensor) -> _Tensor:
+            image = image.to(self.backbone.patch_embed.proj.weight.dtype)
             outputs = self.backbone.get_intermediate_layers(
                 image, n=[self.backbone.n_blocks - 1], reshape=True
             )
-            return outputs[0]
+            return outputs[0].float()
 
         @property
         def downsize(self) -> int:
             return self.backbone.patch_size
 
+        @property
+        def device(self) -> torch.device:
+            return self.backbone.patch_embed.proj.weight.device
+
     backbone = torch.hub.load('facebookresearch/dinov2', model_name)
 
     for param in backbone.parameters():
-        param.requires_grad_ = False
+        param.requires_grad = False
+
+    backbone = backbone.to(torch.float16)
 
     return _build_fsod(
         DinoV2Patch(backbone),

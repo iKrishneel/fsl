@@ -55,9 +55,9 @@ transforms:
       hflip: False
       vflip: False
     ResizeLongestSide:
-      size: 840
+      size: 896
     PadToSize:
-      size: 840
+      size: 896
     ArgumentNoisyBBoxes:
       background_id: -1
     Normalize:
