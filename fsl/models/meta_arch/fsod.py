@@ -212,7 +212,6 @@ def build_cie_fsod(
         def dtype(self) -> torch.dtype:
             return self.model.conv1.weight.dtype
 
-
     model, _ = clip.load(model_name)
 
     for name in ['transformer', 'token_embedding', 'ln_final']:
@@ -230,4 +229,45 @@ def build_cie_fsod(
         background_prototype_file,
         all_classes_fn,
         seen_classes_fn,
+    )
+
+
+@model_registry('dinov2_fsod')
+def build_dinov2_fsod(
+    model_name: str = 'dinov2_vitb14',
+    roi_pool_size: int = 16,
+    prototype_file: str = None,
+    background_prototype_file: str = None,
+    all_classes_fn: str = None,
+    seen_classes_fn: str = None,
+) -> FSOD:
+
+    class DinoV2Patch(nn.Module):
+        def __init__(self, backbone):
+            super(DinoV2Patch, self).__init__()
+            self.backbone = backbone.eval()
+
+        @torch.no_grad()
+        def forward(self, image: _Tensor) -> _Tensor:
+            outputs = self.backbone.get_intermediate_layers(
+                image, n=[self.backbone.n_blocks - 1], reshape=True
+            )
+            return outputs[0]
+
+        @property
+        def downsize(self) -> int:
+            return self.backbone.patch_size
+
+    backbone = torch.hub.load('facebookresearch/dinov2', model_name)
+
+    for param in backbone.parameters():
+        param.requires_grad_ = False
+
+    return _build_fsod(
+        DinoV2Patch(backbone),
+        roi_pool_size,
+        prototype_file,
+        background_prototype_file,
+        all_classes_fn,
+        seen_classes_fn
     )

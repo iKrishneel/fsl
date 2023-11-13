@@ -23,6 +23,10 @@ models:
     <<: *model
     prototype_file: "/root/krishneel/Downloads/fsl/prototypes/cie_fsod/fg/fs_coco_trainval_novel_30shot.pkl"
     background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/cie_fsod/bg/panoptic_train2017_only_stuffs.pkl"
+  dinov2_fsod:
+    <<: *model
+    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/cie_fsod/fg/fs_coco_trainval_novel_30shot.pkl"
+    background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/cie_fsod/bg/panoptic_train2017_only_stuffs.pkl" 
 
 datasets:
   dataloader:
@@ -51,15 +55,15 @@ transforms:
       hflip: False
       vflip: False
     ResizeLongestSide:
-      size: 800
+      size: 840
     PadToSize:
-      size: 800
+      size: 840
     ArgumentNoisyBBoxes:
       background_id: -1
     Normalize:
       mean: [0.48145466, 0.4578275, 0.40821073]
       std: [0.26862954, 0.26130258, 0.27577711]
-      
+
   val:
     <<: *trans
     VHFlip:
@@ -97,6 +101,8 @@ build:
       func: "default_evaluation"
       transforms: "val"
   cie_fsod:
+    <<: *build
+  dinov2_fsod:
     <<: *build
 
   model: "resnet_fsod"
