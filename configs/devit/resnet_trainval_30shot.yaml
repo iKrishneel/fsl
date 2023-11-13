@@ -25,8 +25,8 @@ models:
     background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/cie_fsod/bg/panoptic_train2017_only_stuffs.pkl"
   dinov2_fsod:
     <<: *model
-    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/cie_fsod/fg/fs_coco_trainval_novel_30shot.pkl"
-    background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/cie_fsod/bg/panoptic_train2017_only_stuffs.pkl" 
+    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/dinov2_fsod/fg/fs_coco_trainval_novel_30shot.pkl"
+    background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/dinov2_fsod/bg/panoptic_train2017_only_stuffs.pkl" 
 
 datasets:
   dataloader:
