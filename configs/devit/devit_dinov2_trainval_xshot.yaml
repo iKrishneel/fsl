@@ -1,0 +1,64 @@
+_base_: "sam_vitb_trainval_30shot.yaml"
+device: "cuda"
+
+workdir:
+  path: "/tmp/fsl/devit_dinov2/"
+  unique: False
+
+distributed:
+  nproc_per_node: 4
+
+models:
+  devit_dinov2_fsod:
+    model_name: "dinov2_vitb14"
+    roi_pool_size: 7
+    all_classes_fn: "../data/coco/all_classes.txt"
+    seen_classes_fn: "../data/coco/seen_classes.txt"
+    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/dinov2/fs_coco14_trainval_base_5shot.vitb14.pkl"
+    background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/dinov2/background_prototypes.vitb14.pth"
+
+datasets:
+  dataloader:
+    batch_size: 1
+    num_workers: 1
+
+transforms:
+  train: &trans
+    engine: "torchvision.transforms"
+    ConvertFormatBoundingBox:
+      old_fmt: "XYWH"
+      new_fmt: "XYXY"
+    ResizeLongestSide:
+      size: 1333
+    ResizeToDivisible:
+      factor: 14
+    Normalize:
+      mean: [0.48145466, 0.4578275, 0.40821073]
+      std: [0.26862954, 0.26130258, 0.27577711]
+  val:
+    <<: *trans
+
+io:
+  checkpoint:
+    root: "perception/models/fsl/devit_dinov2"
+
+build:
+  mode: "train"
+  devit_dinov2_fsod:
+    dataset: "coco"
+    weights: "/root/krishneel/Downloads/fsl/weights/devit_dinov2_fsod_vitb14.pth"
+    train:
+      solver: "SGD"
+      scheduler: "StepLR"
+      epochs: 10
+    val:
+      func: "default_val_forward"
+      transforms: "val"
+    inference:
+      engine: "inference"
+
+  model: "devit_dinov2_fsod"
+
+options:
+  train: False
+  eval: True

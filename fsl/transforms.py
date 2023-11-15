@@ -107,13 +107,12 @@ class Resize(object):
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
         image, bboxes = [data[key] for key in ['image', 'bboxes']]
 
-        image = Image.fromarray(image) if isinstance(image, np.ndarray) else image
-        img_hw = image.size[::-1]
-
+        # image = Image.fromarray(image) if isinstance(image, np.ndarray) else image
+        img_hw = image.shape[1:]
         image = TF.resize(image, self.size)
 
         if bboxes is not None:
-            bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=image.size[::-1])[0] for bbox in bboxes]
+            bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=image.shape[1:])[0] for bbox in bboxes]
 
         data['image'] = image
         data['bboxes'] = bboxes
@@ -219,7 +218,7 @@ class ResizeToDivisible(object):
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
         image, bboxes = [data[key] for key in ['image', 'bboxes']]
 
-        w, h = image.size
+        w, h = image.size if isinstance(image, Image.Image) else image.shape[1:][::-1]
         h, w = h - h % self.factor, w - w % self.factor
         return Resize([h, w])(data)
 

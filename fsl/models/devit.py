@@ -222,6 +222,7 @@ class DeVit(nn.Module):
 
     @torch.no_grad()
     def forward_once(self, roi_features: _Tensor, class_labels: _Tensor = None) -> Dict[str, Any]:
+        self.test_class_weight.to(roi_features.dtype)
         num_classes = len(self.test_class_weight)
 
         # sample topk classes
@@ -249,7 +250,7 @@ class DeVit(nn.Module):
         output = {'scores': scores[:, :-1]}
 
         if sample_class_enabled:
-            full_scores = torch.zeros(len(scores), num_classes + 1, device=self.device)
+            full_scores = torch.zeros(len(scores), num_classes + 1, device=self.device, dtype=roi_features.dtype)
             full_scores.scatter_(1, class_indices, scores)
 
             scores = full_scores
@@ -306,7 +307,7 @@ class DeVit(nn.Module):
             else feats
         )
         intra_dist_emb = self.distance_embed(intra_feats.flatten(0, 1), num_pos_feats=self.t_pos_emb)
-        intra_dist_emb = self.fc_intra_class(intra_dist_emb)
+        intra_dist_emb = self.fc_intra_class(intra_dist_emb.to(roi_features.dtype))
         intra_dist_emb = intra_dist_emb.reshape(bs, spatial_size, num_active_classes, -1)
 
         # (Nxclasses) x emb x S x S
@@ -529,7 +530,10 @@ class DeVitSam(DeVit):
 
         roi_features = self.roi_pool(features, rois)  # N, C, k, k
 
-        return super().forward_once(roi_features)
+        breakpoint()
+        
+        predictions = super().forward_once(roi_features)
+        return predictions
 
     @torch.no_grad()
     def build_image_prototypes(self, image: _Tensor, instances: Instances) -> ProtoTypes:
@@ -603,46 +607,6 @@ def devit_sam(
     mask_generator = build_sam_auto_mask_generator(sam_args, mask_gen_args)
     return build_devit_sam(
         mask_generator,
-        roi_pool_size,
-        prototype_file,
-        background_prototype_file,
-        all_classes_fn,
-        seen_classes_fn,
-    )
-
-
-@model_registry
-def devit_dinov2(
-    model_name: str = 'dinov2_vitb14',
-    roi_pool_size: int = 16,
-    prototype_file: str = None,
-    background_prototype_file: str = None,
-    all_classes_fn: str = None,
-    seen_classes_fn: str = None,
-) -> DeVitSam:
-    backbone = torch.hub.load('facebookresearch/dinov2', model_name)
-
-    class DinoV2Patch(nn.Module):
-        def __init__(self, backbone):
-            super(DinoV2Patch, self).__init__()
-            self.backbone = backbone.eval()
-
-        @torch.no_grad()
-        def forward(self, image: _Tensor) -> _Tensor:
-            outputs = self.backbone.get_intermediate_layers(image, n=[self.backbone.n_blocks - 1], reshape=True)
-            return outputs[0]
-
-        @property
-        def downsize(self) -> int:
-            return self.backbone.patch_size
-
-    for param in backbone.parameters():
-        param.requires_grad_ = False
-
-    backbone = DinoV2Patch(backbone)
-
-    return build_devit_sam(
-        backbone,
         roi_pool_size,
         prototype_file,
         background_prototype_file,

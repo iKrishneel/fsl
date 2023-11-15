@@ -58,8 +58,12 @@ class FSOD(nn.Module):
 
         bboxes = torch.cat([proposal.to_tensor().bboxes.to(self.device) for proposal in proposals])
         rois = torch.cat([torch.full((len(bboxes), 1), fill_value=0).to(self.device), bboxes], dim=1)
-        roi_features = self.forward_features(features, rois)
-        response = self.classifier(roi_features, rois)
+        roi_features = self.forward_features(features, rois.to(features.dtype))
+        response = self.classifier(roi_features)
+
+        x = torch.argmax(response[0]['scores'], dim=1)
+        breakpoint()
+        
         return response
 
     @torch.no_grad()
@@ -87,7 +91,7 @@ def _build_fsod(
 ) -> FSOD:
     from fsl.models.devit import build_devit
 
-    roi_pooler = RoIAlign(roi_pool_size, spatial_scale=1 / 32, sampling_ratio=-1)
+    roi_pooler = RoIAlign(roi_pool_size, spatial_scale=1 / mask_generator.downsize, sampling_ratio=-1)
     classifier = build_devit(prototype_file, background_prototype_file, all_classes_fn, seen_classes_fn)
 
     return FSOD(mask_generator, classifier, roi_pooler)
@@ -268,4 +272,51 @@ def build_dinov2_fsod(
 
     return _build_fsod(
         DinoV2Patch(backbone), roi_pool_size, prototype_file, background_prototype_file, all_classes_fn, seen_classes_fn
+    )
+
+
+@model_registry
+def devit_dinov2_fsod(
+    model_name: str = 'dinov2_vitb14',
+    roi_pool_size: int = 7,
+    prototype_file: str = None,
+    background_prototype_file: str = None,
+    all_classes_fn: str = None,
+    seen_classes_fn: str = None,
+) -> FSOD:
+    backbone = torch.hub.load('facebookresearch/dinov2', model_name)
+
+    class DinoV2Patch(nn.Module):
+        def __init__(self, backbone):
+            super(DinoV2Patch, self).__init__()
+            self.backbone = backbone.eval()
+
+        @torch.no_grad()
+        def forward(self, image: _Tensor) -> _Tensor:
+            image = image.to(self.dtype)
+            outputs = self.backbone.get_intermediate_layers(image, n=[self.backbone.n_blocks - 1], reshape=True)
+            return outputs[0]
+
+        @property
+        def downsize(self) -> int:
+            return self.backbone.patch_size
+
+        @property
+        def device(self):
+            return self.backbone.patch_embed.proj.weight.device
+
+        @property
+        def dtype(self):
+            return backbone.patch_embed.proj.weight.dtype
+
+    for param in backbone.parameters():
+        param.requires_grad = False
+
+    return _build_fsod(
+        DinoV2Patch(backbone),
+        roi_pool_size,
+        prototype_file,
+        background_prototype_file,
+        all_classes_fn,
+        seen_classes_fn,
     )
