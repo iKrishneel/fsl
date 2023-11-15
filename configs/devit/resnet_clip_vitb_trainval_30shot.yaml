@@ -1,0 +1,38 @@
+_base_: "sam_vitb_trainval_30shot.yaml"
+
+workdir:
+  path: "/tmp/fsl/resnet_clip_vitb_coco2017/"
+
+models:
+  resnet_clip_fsod:
+    clip_args:
+      model_name: "ViT-B/32"
+      remove_keys: ["visual"]
+    roi_pool_size: 7
+    all_classes_fn: "../data/coco/all_classes.txt"
+    seen_classes_fn: "../data/coco/seen_classes.txt"
+    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/resnet_fsod/fs_coco_trainval_novel_30shot.pkl"
+    background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/resnet_fsod/bg/panoptic_train2017_only_stuffs.pkl"
+
+io:
+  checkpoint:
+    root: "perception/models/fsl/resnet_clip_vitb_coco17_30shot/"
+
+solvers:
+  schedulers:
+    StepLR:
+      step_size: 10
+
+build:
+  resnet_clip_fsod:
+    dataset: "coco"
+    transforms: "train"
+    train:
+      solver: "SGD"
+      scheduler: "StepLR"
+      epochs: 100
+    val:
+      func: "default_val_forward"
+      transforms: "val"
+
+  model: "resnet_clip_fsod"

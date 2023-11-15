@@ -165,7 +165,6 @@ def build_cie_fsod(
     all_classes_fn: str = None,
     seen_classes_fn: str = None,
 ) -> FSOD:
-
     import clip
 
     assert model_name in clip.available_models(), f'{model_name} not found in Clip Model'
@@ -241,7 +240,6 @@ def build_dinov2_fsod(
     all_classes_fn: str = None,
     seen_classes_fn: str = None,
 ) -> FSOD:
-
     class DinoV2Patch(nn.Module):
         def __init__(self, backbone):
             super(DinoV2Patch, self).__init__()
@@ -250,9 +248,7 @@ def build_dinov2_fsod(
         @torch.no_grad()
         def forward(self, image: _Tensor) -> _Tensor:
             image = image.to(self.backbone.patch_embed.proj.weight.dtype)
-            outputs = self.backbone.get_intermediate_layers(
-                image, n=[self.backbone.n_blocks - 1], reshape=True
-            )
+            outputs = self.backbone.get_intermediate_layers(image, n=[self.backbone.n_blocks - 1], reshape=True)
             return outputs[0].float()
 
         @property
@@ -271,10 +267,5 @@ def build_dinov2_fsod(
     backbone = backbone.to(torch.float16)
 
     return _build_fsod(
-        DinoV2Patch(backbone),
-        roi_pool_size,
-        prototype_file,
-        background_prototype_file,
-        all_classes_fn,
-        seen_classes_fn
+        DinoV2Patch(backbone), roi_pool_size, prototype_file, background_prototype_file, all_classes_fn, seen_classes_fn
     )

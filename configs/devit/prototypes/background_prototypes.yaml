@@ -1,60 +1,22 @@
-driver: torch
-device: "cuda"
-
-models:
-  sam_fsod:
-    sam_args:
-      model: "vit_b"
-    roi_pool_size: 7
-  resnet_fsod:
-    roi_pool_size: 7
-  cie_fsod:
-    roi_pool_size: 7
-  dinov2_fsod:
-    roi_pool_size: 7
+_base_: "foreground_prototypes.yaml"
 
 datasets:
-  dataloader:
-    batch_size: 1
-    num_workers: 0
-    shuffle: False
-    pin_memory: True
-    collate_fn: "collate_data"
   coco:
     val:
       bucket_name: "sr-shokunin"
       root: "perception/datasets/coco/train2017"
       anno_fn: "/root/krishneel/Downloads/coco/panoptic_train2017_only_stuffs.json"
 
-transforms:
-  val:
-    engine: "torchvision.transforms"
-    ConvertFormatBoundingBox:
-      old_fmt: "XYWH"
-      new_fmt: "XYXY"
-    ResizeLongestSide:
-      size: 896  # 1024
-    PadToSize:
-      size: 896  # 1024
-    Normalize:
-      mean: [0.48145466, 0.4578275, 0.40821073]
-      std: [0.26862954, 0.26130258, 0.27577711]
-
 io:
   file_io:
-    engine: 'prototype_writer'
-    root: "/root/krishneel/Downloads/fsl/prototypes/devit_sam/background/"
+    root: "/root/krishneel/Downloads/fsl/prototypes/"
 
 build:
-  mode: "val"
   sam_fsod: &setup
     dataset: "coco"
     val:
-      func: "prototype_forward"
-      transforms: "val"
       event_handlers:
         collate_and_write:
-          event_type: COMPLETED
           filename: "panoptic_train2017_only_stuffs.pkl"
   resnet_fsod:
     <<: *setup
@@ -62,10 +24,3 @@ build:
     <<: *setup
   dinov2_fsod:
     <<: *setup
-
-  model: "sam_fsod"
-
-options:
-  train: False
-  eval: True
-

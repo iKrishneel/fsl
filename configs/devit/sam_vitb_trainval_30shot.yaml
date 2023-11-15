@@ -1,4 +1,3 @@
-driver: torch
 device: "cuda"
 
 workdir:
@@ -6,11 +5,7 @@ workdir:
   unique: False
 
 distributed:
-  backend: nccl
-  type: single  # single or multiple
   nproc_per_node: 4
-  single:
-    init_method: tcp://127.0.0.1:23456
 
 models:
   sam_fsod:
@@ -26,8 +21,6 @@ datasets:
   dataloader:
     batch_size: 16
     num_workers: 16
-    shuffle: True
-    pin_memory: True
     collate_fn: "collate_data_instances"
   coco:
     train:
@@ -87,6 +80,7 @@ io:
 build:
   sam_fsod:
     dataset: "coco"
+    transforms: "train"
     train:
       solver: "SGD"
       scheduler: "StepLR"

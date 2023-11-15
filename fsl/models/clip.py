@@ -26,6 +26,18 @@ class CLIP(nn.Module):
         assert clip_model in clip.available_models(), f'{clip_model} not found. Available are {clip.available_models()}'
         self.clip_model, self.preprocessing = self.get_clip_model(clip_model, remove_keys=remove_keys)
 
+    def encode_text(self, text: _Tensor) -> _Tensor:
+        x = self.clip_model.token_embedding(text).type(self.dtype)
+        x = x + self.clip_model.positional_embedding.type(self.dtype)
+        x = x.permute(1, 0, 2)  # NLD -> LND
+        x = self.clip_model.transformer(x)
+        x = x.permute(1, 0, 2)  # LND -> NLD
+        x = self.clip_model.ln_final(x).type(self.dtype)
+
+        # x.shape = [batch_size, n_ctx, transformer.width]
+        # take features from the eot embedding (eot_token is the highest number in each sequence)
+        return x[torch.arange(x.shape[0]), text.argmax(dim=-1)] @ self.clip_model.text_projection
+
     def forward(self, image: Union[_Tensor, _Image], bboxes: List[_Tensor]):
         img = Image.fromarray(image.permute(1, 2, 0).cpu().numpy()) if not isinstance(image, Image.Image) else image
         im_crops = torch.stack([self.preprocessing(img.crop(bbox.int().cpu().numpy())) for bbox in bboxes])
@@ -33,7 +45,7 @@ class CLIP(nn.Module):
         return roi_feats
 
     def forward_text(self, text_tokens: _Tensor) -> _Tensor:
-        text_features = self.clip_model.encode_text(text_tokens).float()
+        text_features = self.encode_text(text_tokens).float()
         return text_features
 
     @torch.no_grad()
@@ -50,6 +62,12 @@ class CLIP(nn.Module):
             layer = self.clip_model.transformer.resblocks[0].attn.out_proj
         return layer.weight.device
 
+    @property
+    def dtype(self):
+        if hasattr(self.clip_model, 'visual'):
+            return self.clip_model.dtype
+        return self.clip_model.transformer.resblocks[0].attn.out_proj.weight.dtype
+
     @staticmethod
     def get_clip_model(name: str, remove_keys: List[str] = []) -> Tuple[clip.model.CLIP, Compose]:
         assert name in clip.available_models(), f'{name} not found. Options are {clip.available_models()}'
@@ -62,7 +80,7 @@ class CLIP(nn.Module):
         return model, preprocessng
 
 
-def build_clip(model_name: str, remove_keys: List[str] = ['visual']) -> CLIP:
+def build_clip(model_name: str, remove_keys: List[str] = []) -> CLIP:
     return CLIP(model_name, remove_keys)
 
 

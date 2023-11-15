@@ -1,4 +1,3 @@
-driver: torch
 device: "cuda"
 
 models:
@@ -12,59 +11,70 @@ models:
     roi_pool_size: 7
   dinov2_fsod:
     roi_pool_size: 7
+  resnet_clip_fsod:
+    clip_args:
+      model_name: "ViT-B/32"
+      remove_keys: ["visual"]
+    roi_pool_size: 7
 
 datasets:
   dataloader:
-    batch_size: 1
-    num_workers: 0
+    num_workers: 1
     shuffle: False
-    pin_memory: True
     collate_fn: "collate_data"
   fs_coco:
-    val:
+    val: &data
       bucket_name: "sr-shokunin"
       root: "perception/datasets/coco/train2017"
       json_file: "/root/krishneel/Downloads/coco/fs_coco_trainval_novel_30shot.json"
 
 transforms:
-  val:
+  trans: &trans
     engine: "torchvision.transforms"
     ConvertFormatBoundingBox:
       old_fmt: "XYWH"
       new_fmt: "XYXY"
     ResizeLongestSide:
-      size: 896 # 1024
+      size: 1024
     PadToSize:
-      size: 896 # 1024
+      size: 1024
     Normalize:
       mean: [0.48145466, 0.4578275, 0.40821073]
       std: [0.26862954, 0.26130258, 0.27577711]
+  trans_dino:
+    <<: *trans
+    ResizeLongestSide:
+      size: 896
+    PadToSize:
+      size: 896
 
 io:
   file_io:
     engine: 'prototype_writer'
-    root: "/root/krishneel/Downloads/fsl/prototypes/devit_sam/"
+    root: "/root/krishneel/Downloads/fsl/prototypes/"
 
 build:
   mode: "val"
   sam_fsod: &setup
     dataset: "fs_coco"
-    val: &val
+    transforms: "trans"
+    val:
       func: "prototype_forward"
-      transforms: "val"
       event_handlers:
         collate_and_write:
           event_type: COMPLETED
           filename: "fs_coco_trainval_novel_30shot.pkl"
   resnet_fsod:
     <<: *setup
+  resnet_clip_fsod:
+    <<: *setup  
   cie_fsod:
     <<: *setup
   dinov2_fsod:
     <<: *setup
+    transforms: "trans_dino"
 
-  model: "sam_fsod"
+  model: "resnet_fsod"
 
 options:
   train: False
-  eval: True
