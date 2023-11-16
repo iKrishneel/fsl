@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from typing import Any, Dict, List, Type, Union
+from typing import Any, Dict, List, Type, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -44,11 +44,10 @@ class FSOD(nn.Module):
 
         roi_features = self.forward_features(im_embeddings, gt_bboxes)
         loss_dict = self.classifier(roi_features, class_labels)
-
         return loss_dict
 
     @torch.no_grad()
-    def inference(self, images: _Tensor, targets: List[Dict[str, Instances]] = None):
+    def inference(self, images: _Tensor, targets: List[Dict[str, Instances]] = None) -> Tuple[Dict[str, Any]]:
         if targets and 'gt_proposal' in targets[0]:
             proposals = [target['gt_proposal'] for target in targets]
             features = self.mask_generator(images)
@@ -60,17 +59,12 @@ class FSOD(nn.Module):
         rois = torch.cat([torch.full((len(bboxes), 1), fill_value=0).to(self.device), bboxes], dim=1)
         roi_features = self.forward_features(features, rois.to(features.dtype))
         response = self.classifier(roi_features)
-
-        x = torch.argmax(response[0]['scores'], dim=1)
-        breakpoint()
-        
         return response
 
     @torch.no_grad()
     def build_image_prototypes(self, image: _Tensor, instances: Instances) -> ProtoTypes:
         features = self.mask_generator(image[None].to(self.device))
         instances = instances.to_tensor(self.device)
-        # roi_feats = self.roi_pooler(features, [instances.bboxes])
         roi_feats = self.forward_features(features, [instances.bboxes])
         index = 2 if len(roi_feats.shape) == 4 else 1
         roi_feats = roi_feats.flatten(index).mean(index)
@@ -144,11 +138,16 @@ def build_resnet_fsod(
 
         @torch.no_grad()
         def forward(self, image: _Tensor) -> _Tensor:
+            image = image.to(self.backbone.conv1.weight.dtype)
             return self.backbone(image.to(self.device))
 
         @property
         def device(self) -> torch.device:
             return self.backbone.conv1.weight.device
+
+        @property
+        def downsize(self) -> int:
+            return 32
 
     return _build_fsod(
         Backbone(backbone.eval()),

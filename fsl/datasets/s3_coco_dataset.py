@@ -11,6 +11,7 @@ from typing import Any, Dict, List
 import numpy as np
 import torch
 import torchvision
+from torchvision.transforms.v2 import functional
 from omegaconf import DictConfig, OmegaConf
 from PIL import Image
 
@@ -129,6 +130,8 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
 
         if image.mode != 'RBG':
             image = image.convert('RGB')
+
+        image = functional.pil_to_tensor(image)
 
         data = {
             'image': image,

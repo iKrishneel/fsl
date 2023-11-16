@@ -36,15 +36,13 @@ class ResizeLongestSide(object):
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
         image, bboxes = [data[key] for key in ['image', 'bboxes']]
-
-        image = Image.fromarray(image) if isinstance(image, np.ndarray) else image
-        img_hw = image.size[::-1]
+        img_hw = image.shape[1:]
 
         target_size = self.get_preprocess_shape(*img_hw, self.size)
         image = TF.resize(image, target_size)
 
         if bboxes is not None:
-            bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=image.size[::-1])[0] for bbox in bboxes]
+            bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=img_hw)[0] for bbox in bboxes]
 
         data['image'] = image
         data['bboxes'] = bboxes
@@ -70,15 +68,13 @@ class ResizeLongestSide2(object):
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
         image, bboxes = [data[key] for key in ['image', 'bboxes']]
-
-        image = Image.fromarray(image) if isinstance(image, np.ndarray) else image
-        img_hw = image.size[::-1]
+        img_hw = image.shape[1:]
 
         target_size = self.get_preprocess_shape(*img_hw)
         image = TF.resize(image, target_size)
 
         if bboxes is not None:
-            bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=image.size[::-1])[0] for bbox in bboxes]
+            bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=img_hw)[0] for bbox in bboxes]
 
         data['image'] = image
         data['bboxes'] = bboxes
@@ -106,8 +102,6 @@ class Resize(object):
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
         image, bboxes = [data[key] for key in ['image', 'bboxes']]
-
-        # image = Image.fromarray(image) if isinstance(image, np.ndarray) else image
         img_hw = image.shape[1:]
         image = TF.resize(image, self.size)
 
@@ -127,8 +121,7 @@ class PadToSize(object):
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
         image, bboxes = [data[key] for key in ['image', 'bboxes']]
-        image = Image.fromarray(image) if isinstance(image, np.ndarray) else image
-        img_hw = image.size[::-1]
+        img_hw = image.shape[1:]
 
         # LRTB --> LTRB
         padding = (0, 0, self.size - img_hw[1], self.size - img_hw[0])
@@ -157,13 +150,13 @@ class VHFlip(object):
         if self.hflip and np.random.choice([True, False]):
             image = hflipper(image)
             if bboxes is not None:
-                spatial_size = image.shape[:1] if isinstance(image, torch.Tensor) else image.size[::-1]
+                spatial_size = image.shape[1:]
                 bboxes = [TF.horizontal_flip_bounding_box(bbox, self.bbox_fmt, spatial_size) for bbox in bboxes]
 
         if self.vflip and np.random.choice([True, False]):
             image = vflipper(image)
             if bboxes is not None:
-                spatial_size = image.shape[:1] if isinstance(image, torch.Tensor) else image.size[::-1]
+                spatial_size = image.shape[1:]
                 bboxes = [TF.vertical_flip_bounding_box(bbox, self.bbox_fmt, spatial_size) for bbox in bboxes]
 
         data['image'] = image
@@ -217,8 +210,7 @@ class ResizeToDivisible(object):
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
         image, bboxes = [data[key] for key in ['image', 'bboxes']]
-
-        w, h = image.size if isinstance(image, Image.Image) else image.shape[1:][::-1]
+        h, w = image.shape[1:]
         h, w = h - h % self.factor, w - w % self.factor
         return Resize([h, w])(data)
 
@@ -245,7 +237,7 @@ class ArgumentNoisyBBoxes(object):
         ]
 
         gt_bboxes = [gt_bbox.reshape(-1, 4) for gt_bbox in gt_bboxes]
-        img_hw = image.shape[1:] if isinstance(image, torch.Tensor) else image.size[::-1]
+        img_hw = image.shape[1:]
         noisy_bboxes = prepare_noisy_boxes(gt_bboxes, img_hw, n=self.sample_size)
         bboxes = torch.cat([torch.cat([gt_bboxes[i], noisy_bboxes[i]]) for i in range(len(gt_bboxes))])
 

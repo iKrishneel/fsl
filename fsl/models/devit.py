@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple, Type, Union
 
 import numpy as np
@@ -9,7 +8,7 @@ import torch.nn as nn
 from igniter.registry import model_registry
 from PIL import Image
 from torchvision.ops import RoIAlign
-from torchvision.ops.boxes import box_area, box_iou
+from torchvision.ops.boxes import box_iou
 
 from fsl.datasets import utils
 from fsl.structures import Instances
@@ -135,13 +134,6 @@ class DeVit(nn.Module):
             self.bg_cnn = PropagateNet(bg_input_dim, self.hidden_dim, num_layers=self.num_cls_layers)
         else:
             pt = prototypes.check(all_cids)
-            """
-            class_order = [pt.labels.index(c) for c in seen_cids] \
-                if self.training else [pt.labels.index(c) for c in all_cids]
-
-            assert -1 not in class_order
-            self.register_buffer('class_weight', pt.normalized_embedding[torch.as_tensor(class_order)])
-            """
             train_class_order = [pt.labels.index(c) for c in seen_cids]
             test_class_order = [pt.labels.index(c) for c in all_cids]
             assert -1 not in train_class_order and -1 not in test_class_order
@@ -529,9 +521,6 @@ class DeVitSam(DeVit):
         features = self.mask_generator(images)
 
         roi_features = self.roi_pool(features, rois)  # N, C, k, k
-
-        breakpoint()
-        
         predictions = super().forward_once(roi_features)
         return predictions
 

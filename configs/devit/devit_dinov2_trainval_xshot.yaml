@@ -23,7 +23,7 @@ datasets:
     num_workers: 1
 
 transforms:
-  train: &trans
+  dinov2_trans:
     engine: "torchvision.transforms"
     ConvertFormatBoundingBox:
       old_fmt: "XYWH"
@@ -35,8 +35,6 @@ transforms:
     Normalize:
       mean: [0.48145466, 0.4578275, 0.40821073]
       std: [0.26862954, 0.26130258, 0.27577711]
-  val:
-    <<: *trans
 
 io:
   checkpoint:
@@ -47,13 +45,13 @@ build:
   devit_dinov2_fsod:
     dataset: "coco"
     weights: "/root/krishneel/Downloads/fsl/weights/devit_dinov2_fsod_vitb14.pth"
+    transforms: "dinov2_trans"
     train:
       solver: "SGD"
       scheduler: "StepLR"
       epochs: 10
     val:
       func: "default_val_forward"
-      transforms: "val"
     inference:
       engine: "inference"
 
