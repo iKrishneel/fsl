@@ -28,7 +28,6 @@ class FSOD(nn.Module):
 
     def forward(self, images: _Tensor, targets: List[Dict[str, Instances]] = None):
         images = torch.stack(images).to(self.device)
-
         if not self.training:
             return self.inference(images, targets)
 
@@ -65,7 +64,8 @@ class FSOD(nn.Module):
     def build_image_prototypes(self, image: _Tensor, instances: Instances) -> ProtoTypes:
         features = self.mask_generator(image[None].to(self.device))
         instances = instances.to_tensor(self.device)
-        roi_feats = self.forward_features(features, [instances.bboxes])
+
+        roi_feats = self.forward_features(features, [instances.bboxes.to(features.dtype)])
         index = 2 if len(roi_feats.shape) == 4 else 1
         roi_feats = roi_feats.flatten(index).mean(index)
         return ProtoTypes(embeddings=roi_feats, labels=instances.labels, instances=instances)
@@ -292,9 +292,10 @@ def devit_dinov2_fsod(
 
         @torch.no_grad()
         def forward(self, image: _Tensor) -> _Tensor:
+            im_dtype = image.dtype
             image = image.to(self.dtype)
             outputs = self.backbone.get_intermediate_layers(image, n=[self.backbone.n_blocks - 1], reshape=True)
-            return outputs[0]
+            return outputs[0].to(im_dtype) if self.training else outputs[0]
 
         @property
         def downsize(self) -> int:
@@ -312,7 +313,7 @@ def devit_dinov2_fsod(
         param.requires_grad = False
 
     return _build_fsod(
-        DinoV2Patch(backbone),
+        DinoV2Patch(backbone.to(torch.float16)),
         roi_pool_size,
         prototype_file,
         background_prototype_file,

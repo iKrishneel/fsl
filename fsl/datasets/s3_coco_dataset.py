@@ -248,6 +248,8 @@ class S3CocoDatasetFS(S3CocoDataset):
 
         assert len(bboxes) > 0, 'Empty bounding boxes'
 
+        image = functional.pil_to_tensor(image)
+
         data = {
             'image': image,
             'bboxes': bboxes,

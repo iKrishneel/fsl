@@ -44,7 +44,7 @@ def prototype_forward(engine, batch) -> None:
 
 
 @event_registry
-def collate_and_write(engine, filename: str, clean: bool = True) -> None:
+def collate_and_write(engine, filename: str, clean: bool = True, per_class_avg: bool = True) -> None:
     root = os.path.join(engine._cfg.io.file_io.root, engine._cfg.build.model)
 
     def _load_pickle(filename: str) -> ProtoTypes:
@@ -67,20 +67,23 @@ def collate_and_write(engine, filename: str, clean: bool = True) -> None:
 
     logger.info(f'Found {len(valid_files)} prototypes')
 
-    average_embeddings = {}
-    for embedding, label in zip(prototypes.embeddings, prototypes.labels):
-        embedding = embedding[None] if len(embedding.shape) == 1 else embedding
-        emb = average_embeddings.get(label, [])
-        emb.append(embedding)
-        average_embeddings[label] = emb
-
     filename = os.path.join(root, filename)
     logger.info('Saving final prototypes to {filename}')
 
-    ProtoTypes(
-        torch.stack([torch.cat(value).mean(dim=0) for key, value in average_embeddings.items()]),
-        list(average_embeddings.keys()),
-    ).save(filename)
+    if per_class_avg:
+        average_embeddings = {}
+        for embedding, label in zip(prototypes.embeddings, prototypes.labels):
+            embedding = embedding[None] if len(embedding.shape) == 1 else embedding
+            emb = average_embeddings.get(label, [])
+            emb.append(embedding)
+            average_embeddings[label] = emb
+
+        ProtoTypes(
+            torch.stack([torch.cat(value).mean(dim=0) for key, value in average_embeddings.items()]),
+            list(average_embeddings.keys()),
+        ).save(filename)
+    else:
+        prototypes.save(filename)
 
     if clean:
         logger.info('Cleaning individual prototypes')
@@ -105,5 +108,5 @@ if __name__ == '__main__':
     from fsl.datasets.s3_coco_dataset import collate_data  # NOQA
     from fsl.models.devit import devit_sam  # NOQA
 
-    initiate('../../configs/devit/prototypes/foreground_prototypes.yaml')
+    # initiate('../../configs/devit/prototypes/foreground_prototypes.yaml')
     initiate('../../configs/devit/prototypes/background_prototypes.yaml')

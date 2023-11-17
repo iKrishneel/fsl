@@ -42,7 +42,7 @@ class ResizeLongestSide(object):
         image = TF.resize(image, target_size)
 
         if bboxes is not None:
-            bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=img_hw)[0] for bbox in bboxes]
+            bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=target_size)[0] for bbox in bboxes]
 
         data['image'] = image
         data['bboxes'] = bboxes
@@ -62,25 +62,11 @@ class ResizeLongestSide(object):
 
 @transform_registry
 @dataclass
-class ResizeLongestSide2(object):
+class ResizeLongestSide2(ResizeLongestSide):
     long_size: int
     short_size: int
 
-    def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        image, bboxes = [data[key] for key in ['image', 'bboxes']]
-        img_hw = image.shape[1:]
-
-        target_size = self.get_preprocess_shape(*img_hw)
-        image = TF.resize(image, target_size)
-
-        if bboxes is not None:
-            bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=img_hw)[0] for bbox in bboxes]
-
-        data['image'] = image
-        data['bboxes'] = bboxes
-        return data
-
-    def get_preprocess_shape(self, oldh: int, oldw: int) -> Tuple[int, int]:
+    def get_preprocess_shape(self, oldh: int, oldw: int, **kwargs) -> Tuple[int, int]:
         """
         Compute the output size given input size and target long side length.
         """
@@ -125,7 +111,7 @@ class PadToSize(object):
 
         # LRTB --> LTRB
         padding = (0, 0, self.size - img_hw[1], self.size - img_hw[0])
-        image = TF.pad_image_pil(image, padding)
+        image = TF.pad_image_tensor(image, padding)
         if bboxes is not None:
             bboxes = [TF.pad_bounding_box(bbox, self.bbox_fmt, img_hw, padding)[0] for bbox in bboxes]
 

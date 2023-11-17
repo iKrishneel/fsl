@@ -11,6 +11,8 @@ models:
     roi_pool_size: 7
   dinov2_fsod:
     roi_pool_size: 7
+  devit_dinov2_fsod:
+    roi_pool_size: 7
   resnet_clip_fsod:
     clip_args:
       model_name: "ViT-B/32"
@@ -29,7 +31,7 @@ datasets:
       json_file: "/root/krishneel/Downloads/coco/fs_coco_trainval_novel_30shot.json"
 
 transforms:
-  trans: &trans
+  trans1: &trans
     engine: "torchvision.transforms"
     ConvertFormatBoundingBox:
       old_fmt: "XYWH"
@@ -42,7 +44,10 @@ transforms:
       mean: [0.48145466, 0.4578275, 0.40821073]
       std: [0.26862954, 0.26130258, 0.27577711]
   trans_dino:
-    <<: *trans
+    engine: "torchvision.transforms"
+    ConvertFormatBoundingBox:
+      old_fmt: "XYWH"
+      new_fmt: "XYXY"
     ResizeLongestSide:
       size: 1333
     ResizeToDivisible:
@@ -73,6 +78,9 @@ build:
   cie_fsod:
     <<: *setup
   dinov2_fsod:
+    <<: *setup
+    transforms: "trans_dino"
+  devit_dinov2_fsod:
     <<: *setup
     transforms: "trans_dino"
 

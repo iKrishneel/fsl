@@ -209,7 +209,6 @@ class DeVit(nn.Module):
             }
 
         del logits
-        # import IPython, sys; IPython.embed(header="Forward"); sys.exit()
         return loss_dict
 
     @torch.no_grad()
