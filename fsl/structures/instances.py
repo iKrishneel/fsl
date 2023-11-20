@@ -37,9 +37,9 @@ class Instances(object):
 
     def __post_init__(self):
         size = max(len(self.bboxes), self.masks.shape[0] if self.masks is not None else 0, len(self.class_ids))
-        if self.bboxes:
+        if len(self.bboxes) > 0:
             assert len(self.bboxes) == size
-        if self.class_ids:
+        if len(self.class_ids) > 0:
             assert len(self.class_ids) == size
         if self.labels:
             assert len(self.labels) == size

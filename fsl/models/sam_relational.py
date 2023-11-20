@@ -23,81 +23,6 @@ _Module = Type[nn.Module]
 _Image = Type[Image.Image]
 
 
-class Conv2dBN(nn.Sequential):
-    def __init__(self, in_channels: int, hidden_channels: int, stride: int = 1, activation: Callable = None) -> None:
-        super(Conv2dBN, self).__init__()
-        self.conv = nn.Conv2d(in_channels, hidden_channels, kernel_size=(3, 3), stride=stride, padding=1, bias=False)
-        self.bn = nn.BatchNorm2d(hidden_channels)
-        self.activation = activation
-
-    def forward(self, x: _Tensor) -> _Tensor:
-        x = self.bn(self.conv(x))
-        x = self.activation(x) if self.activation else x
-        return x
-
-
-class AttentionPool2d(nn.Module):
-    """
-    Performs attention pooling on the feature maps
-    Ref: https://github.com/openai/CLIP/blob/main/clip/model.py#L58
-    """
-
-    def __init__(self, spatial_dim: int, embed_dim: int, num_heads: int, output_dim: int = None):
-        super(AttentionPool2d, self).__init__()
-        self.positional_embedding = nn.Parameter(torch.randn(spatial_dim**2 + 1, embed_dim) / embed_dim**0.5)
-        self.k_proj = nn.Linear(embed_dim, embed_dim)
-        self.q_proj = nn.Linear(embed_dim, embed_dim)
-        self.v_proj = nn.Linear(embed_dim, embed_dim)
-        self.c_proj = nn.Linear(embed_dim, output_dim or embed_dim)
-        self.num_heads = num_heads
-
-    def forward(self, x):
-        x = x.flatten(start_dim=2).permute(2, 0, 1)  # NCHW -> (HW)NC
-        x = torch.cat([x.mean(dim=0, keepdim=True), x], dim=0)  # (HW+1)NC
-        x = x + self.positional_embedding[:, None, :].to(x.dtype)  # (HW+1)NC
-        x, _ = F.multi_head_attention_forward(
-            query=x[:1],
-            key=x,
-            value=x,
-            embed_dim_to_check=x.shape[-1],
-            num_heads=self.num_heads,
-            q_proj_weight=self.q_proj.weight,
-            k_proj_weight=self.k_proj.weight,
-            v_proj_weight=self.v_proj.weight,
-            in_proj_weight=None,
-            in_proj_bias=torch.cat([self.q_proj.bias, self.k_proj.bias, self.v_proj.bias]),
-            bias_k=None,
-            bias_v=None,
-            add_zero_attn=False,
-            dropout_p=0,
-            out_proj_weight=self.c_proj.weight,
-            out_proj_bias=self.c_proj.bias,
-            use_separate_proj_weight=True,
-            training=self.training,
-            need_weights=False,
-        )
-        return x.squeeze(0)
-
-
-class Relational(nn.Module):
-    def __init__(self, in_channels: int, hidden_channels: int = 64, spatial_dim: int = 16):
-        super(Relational, self).__init__()
-
-        self.conv1 = Conv2dBN(in_channels, hidden_channels, activation=nn.ReLU())
-        self.conv2 = Conv2dBN(hidden_channels, hidden_channels, activation=nn.ReLU())
-        self.attnpool = AttentionPool2d(spatial_dim, hidden_channels, 8, hidden_channels)
-        self.fc1 = nn.Linear(hidden_channels, 8)
-        self.fc2 = nn.Linear(8, 1)
-
-    def forward(self, x: _Tensor) -> _Tensor:
-        x = self.conv1(x)
-        x = self.conv2(x)
-        x = self.attnpool(x)
-        x = F.relu(self.fc1(x))
-        x = F.sigmoid(self.fc2(x))
-        return x
-
-
 class SamPredictor(nn.Module, _SamPredictor):
     def __init__(self, sam):
         super(SamPredictor, self).__init__()
@@ -125,7 +50,7 @@ class SamPredictor(nn.Module, _SamPredictor):
             )
 
         self.model.image_encoder.to(self.device)
-        return self.model.image_encoder(images)
+        return self.model.image_encoder(images.to(self.device))
 
     @property
     def img_size(self) -> List[int]:
@@ -182,144 +107,6 @@ class SamAutomaticMaskGenerator(nn.Module, _SAMG):
         return self.predictor.device
 
 
-class SamRelationNetwork(nn.Module):
-    def __init__(
-        self, mask_generator: SamAutomaticMaskGenerator, relational_in_size: int = 128, roi_pool_size: int = 16
-    ) -> None:
-        super(SamRelationNetwork, self).__init__()
-        self.mask_generator = mask_generator
-
-        self.condenser = nn.Conv2d(
-            self.sam_predictor.out_channels * 2, relational_in_size, kernel_size=(3, 3), stride=1, padding=1
-        )
-        self.relation_net = Relational(relational_in_size, hidden_channels=relational_in_size // 2)
-        self.roi_pool = RoIAlign(
-            roi_pool_size, spatial_scale=1 / self.sam_predictor.downsize, sampling_ratio=0, aligned=True
-        )
-        self._query_feats = None
-
-    def forward(self, images: List[Union[np.ndarray, _Image]], targets: Dict[str, Any] = None):
-        if not self.training:
-            return self.forward_inference(images)
-
-        assert self.training and targets is not None
-
-        query_index = 0
-        labels = torch.Tensor([i for target in targets for i in target['category_ids']])
-        # y_true = torch.Tensor([1]) if labels.shape[0] == 1 else labels.eq(labels[query_index]).float()[1:]
-
-        sam_feats = self.forward_sam(images)
-        bboxes = self.get_roi_bboxes(targets if self.training else sam_feats[1])
-        roi_feats = self.roi_pool(sam_feats, bboxes)
-
-        if labels.shape[0] == 1:
-            y_true = torch.Tensor([1])
-            query_feats = roi_feats.clone()
-        else:
-            mode, index = torch.mode(labels)
-            query_index = int(index)
-            y_true = labels.eq(mode).float()
-            y_true = torch.cat((y_true[:query_index], y_true[query_index + 1 :]), dim=0)
-
-            k = roi_feats.shape[0]
-            query_feats = roi_feats[query_index][None].repeat(k - 1, 1, 1, 1)
-            roi_feats = self.remove(roi_feats, query_index)
-
-        roi_feats = torch.cat([roi_feats, query_feats], dim=1)
-        roi_feats = self.condenser(roi_feats)
-        y_pred = self.relation_net(roi_feats)
-
-        assert (
-            y_true.shape[0] == roi_feats.shape[0]
-        ), f'Shape mismatch of label {y_true.shape} and roi {roi_feats.shape}'
-
-        y_true = y_true.reshape(-1, 1).to(self.device)
-        return self.losses(y_pred, y_true)
-
-    @torch.no_grad()
-    def forward_inference(self, images: List[Union[np.ndarray, _Image]]) -> Any:
-        masks = self.forward_sam(images)
-        bboxes = [torch.FloatTensor(S3CocoDatasetSam.xywh_to_xyxy(mask['bbox'])) for mask in masks]
-        bboxes = [torch.stack(bboxes).to(self.sam_predictor.features.device)]
-        roi_feats = self.roi_pool(self.sam_predictor.features, bboxes)
-
-        query_feats = self.query_feats.repeat(roi_feats.shape[0], 1, 1, 1)
-        roi_feats = torch.cat([roi_feats, query_feats], dim=1)
-        roi_feats = self.condenser(roi_feats)
-        y_pred = self.relation_net(roi_feats)
-
-        import sys
-
-        import IPython
-
-        IPython.embed(header="forward")
-        sys.exit()
-
-        raise NotImplementedError('Inference is not yet implemented!')
-
-    @torch.no_grad()
-    def forward_sam(
-        self, images: List[np.ndarray], only_feats: bool = False
-    ) -> Union[_Tensor, Tuple[_Tensor, List[Dict[str, Any]]]]:
-        x = [np.asarray(image) for image in images]
-        if self.training or only_feats:
-            return self.sam_predictor.set_images(x)
-
-        self.mask_generator.predictor.set_image(x[0])
-        masks = self.mask_generator.generate(x[0])
-        return masks
-
-    def set_query_images(self, images: List[Union[np.ndarray, _Image]], bboxes: List[np.ndarray]):
-        features = self.forward_sam(images)
-        self._query_feats = self.roi_pool(features, bboxes)
-
-    def set_query_roi_features(self, features: _Tensor) -> None:
-        expected_size = torch.Size([self.roi_pool.output_size] * 2)
-        assert features.shape[2:] == expected_size, f'Expected spatial size {expected_size} but got features.shape[2:]'
-        self._query_feats = features.to(self.device)
-
-    def get_query_roi_features(self, images: List[Union[np.ndarray, _Image]], bboxes: List[np.ndarray]):
-        features = self.forward_sam(images, only_feats=True)
-        bboxes = [bbox.to(self.device) for bbox in bboxes]
-        return self.roi_pool(features, bboxes)
-
-    def get_roi_bboxes(self, targets: List[Dict[str, _Tensor]] = None):
-        if targets is not None:
-            bboxes = [torch.stack(target['bboxes']).to(self.device) for target in targets]
-        return bboxes
-
-    def losses(self, y_pred: _Tensor, y_true: _Tensor) -> Dict[str, _Tensor]:
-        return {'loss': F.mse_loss(y_pred, y_true)}
-
-    def to(self, *args, **kwargs):
-        self.sam_predictor.model.to(*args, **kwargs)
-        return super(SamRelationNetwork, self).to(*args, **kwargs)
-
-    def cuda(self, device: Union[int, torch.device] = None):
-        self.sam_predictor.model.cuda(device)
-        return super(SamRelationNetwork, self).cuda(device)
-
-    def eval(self):
-        self.sam_predictor.model.eval()
-        return super(SamRelationNetwork, self).eval()
-
-    @staticmethod
-    def remove(tensor: _Tensor, index: int) -> _Tensor:
-        return torch.cat((tensor[:index], tensor[index + 1 :]), dim=0)
-
-    @property
-    def query_feats(self) -> _Tensor:
-        return self._query_feats
-
-    @property
-    def sam_predictor(self) -> SamPredictor:
-        return self.mask_generator.predictor
-
-    @property
-    def device(self) -> torch.device:
-        return self.sam_predictor.model.image_encoder.patch_embed.proj.weight.device
-
-
 def get_sam_model(name: str = 'default'):
     import os
     import subprocess
@@ -355,11 +142,3 @@ def build_sam_predictor(model: str, checkpoint: str = None) -> SamPredictor:
 def build_sam_auto_mask_generator(sam_args: Dict[str, str], mask_gen_args: Dict[str, Any]) -> SamAutomaticMaskGenerator:
     sam_predictor = build_sam_predictor(**sam_args)
     return SamAutomaticMaskGenerator(sam_predictor.model, **mask_gen_args)
-
-
-@model_registry('relational_network')
-def sam_relational_network(
-    sam_args: Dict[str, str] = {'model': 'default', 'checkpoint': None}, mask_gen_args: Dict[str, Any] = {}
-) -> SamRelationNetwork:
-    mask_generator = build_sam_auto_mask_generator(sam_args, mask_gen_args)
-    return SamRelationNetwork(mask_generator)

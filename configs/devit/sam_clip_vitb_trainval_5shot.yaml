@@ -1,0 +1,29 @@
+_base_: "sam_vitb_trainval_30shot.yaml"
+
+workdir:
+  path: "/tmp/fsl/sam_clip_vitb_coco2017/"
+
+models:
+  devit_sam_clip:
+    sam_args:
+      model: vit_b
+    all_classes_fn: "../data/coco/all_classes.txt"
+    seen_classes_fn: "../data/coco/seen_classes.txt"
+    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/fs_coco_trainval_novel_5shot.pkl"
+
+io:
+  checkpoint:
+    root: "perception/models/fsl/sam_clip_vitb_coco17_5shot/"
+
+build:
+  devit_sam_clip:
+    dataset: "coco"
+    train:
+      solver: "SGD"
+      scheduler: "StepLR"
+      epochs: 20
+    val:
+      func: "default_val_forward"
+      transforms: "val"
+
+  model: "devit_sam_clip"

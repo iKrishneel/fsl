@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 
-from typing import List, Tuple, Union
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Tuple, Union
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torchvision
 from igniter.registry import transform_registry
 from PIL import Image
@@ -12,9 +12,12 @@ from PIL import Image
 torchvision.disable_beta_transforms_warning()  # NOQA
 
 from torchvision import transforms
+from torchvision.ops.boxes import box_iou
 from torchvision.transforms.v2 import functional as TF
 
+from fsl.datasets.utils import prepare_noisy_boxes
 from fsl.utils import version
+from fsl.utils.matcher import Matcher
 
 if version.minor_version(torchvision.__version__) <= 15:
     from torchvision.datapoints import BoundingBoxFormat
@@ -27,22 +30,23 @@ _Image = Image.Image
 
 
 @transform_registry
-class ResizeLongestSide(nn.Module):
-    def __init__(self, size: int) -> None:
-        super(ResizeLongestSide, self).__init__()
-        self.size = size
+@dataclass
+class ResizeLongestSide(object):
+    size: int
 
-    def forward(self, image: Union[_Image, np.ndarray], bboxes: List[_Tensor] = None) -> Tuple[_Image, _Tensor]:
-        image = Image.fromarray(image) if isinstance(image, np.ndarray) else image
-        img_hw = image.size[::-1]
+    def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        image, bboxes = [data[key] for key in ['image', 'bboxes']]
+        img_hw = image.shape[1:]
 
         target_size = self.get_preprocess_shape(*img_hw, self.size)
         image = TF.resize(image, target_size)
 
         if bboxes is not None:
-            bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=image.size[::-1])[0] for bbox in bboxes]
+            bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=target_size)[0] for bbox in bboxes]
 
-        return image, bboxes
+        data['image'] = image
+        data['bboxes'] = bboxes
+        return data
 
     @staticmethod
     def get_preprocess_shape(oldh: int, oldw: int, long_side_length: int) -> Tuple[int, int]:
@@ -57,113 +61,209 @@ class ResizeLongestSide(nn.Module):
 
 
 @transform_registry
-class Resize(nn.Module):
-    def __init__(self, size: Union[List[int], int]):
-        super(Resize, self).__init__()
-        self.size = size
+@dataclass
+class ResizeLongestSide2(ResizeLongestSide):
+    long_size: int
+    short_size: int
 
-    def forward(self, image: Union[_Image, np.ndarray], bboxes: List[_Tensor] = None) -> Tuple[_Image, _Tensor]:
-        image = Image.fromarray(image) if isinstance(image, np.ndarray) else image
-        img_hw = image.size[::-1]
+    def get_preprocess_shape(self, oldh: int, oldw: int, **kwargs) -> Tuple[int, int]:
+        """
+        Compute the output size given input size and target long side length.
+        """
+        scale_long = self.long_size * 1.0 / max(oldh, oldw)
+        scale_short = self.short_size * 1.0 / min(oldh, oldw)
 
+        newh = oldh * (scale_long if oldh > oldw else scale_short)
+        neww = oldw * (scale_short if oldh > oldw else scale_long)
+
+        neww = int(neww + 0.5)
+        newh = int(newh + 0.5)
+        return (newh, neww)
+
+
+@transform_registry
+@dataclass
+class Resize(object):
+    size: Union[List[int], int]
+
+    def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        image, bboxes = [data[key] for key in ['image', 'bboxes']]
+        img_hw = image.shape[1:]
         image = TF.resize(image, self.size)
 
         if bboxes is not None:
-            bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=image.size[::-1])[0] for bbox in bboxes]
+            bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=image.shape[1:])[0] for bbox in bboxes]
 
-        return image, bboxes
+        data['image'] = image
+        data['bboxes'] = bboxes
+        return data
 
 
 @transform_registry
-class PadToSize(nn.Module):
-    def __init__(self, size: int, bbox_fmt: BoundingBoxFormat = BoundingBoxFormat.XYXY):
-        super(PadToSize, self).__init__()
-        self.size = size
-        self.bbox_fmt = bbox_fmt
+@dataclass
+class PadToSize(object):
+    size: int
+    bbox_fmt: BoundingBoxFormat = BoundingBoxFormat.XYXY
 
-    def forward(self, image: Union[np.ndarray, _Image], bboxes: List[_Tensor] = None) -> Tuple[_Image, _Tensor]:
-        image = Image.fromarray(image) if isinstance(image, np.ndarray) else image
-        img_hw = image.size[::-1]
-
-        # padh, padw = self.size - img_hw[0], self.size - img_hw[1]
-        # image = torch.from_numpy(np.array(image)).permute((2, 0, 1))
-        # image = nn.functional.pad(image, (0, padw, 0, padh))
+    def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        image, bboxes = [data[key] for key in ['image', 'bboxes']]
+        img_hw = image.shape[1:]
 
         # LRTB --> LTRB
         padding = (0, 0, self.size - img_hw[1], self.size - img_hw[0])
-        image = TF.pad_image_pil(image, padding)
+        image = TF.pad_image_tensor(image, padding)
         if bboxes is not None:
             bboxes = [TF.pad_bounding_box(bbox, self.bbox_fmt, img_hw, padding)[0] for bbox in bboxes]
 
-        return image, bboxes
+        data['image'] = image
+        data['bboxes'] = bboxes
+        return data
 
 
 @transform_registry
-class VHFlip(nn.Module):
-    def __init__(self, hflip: bool = True, vflip: bool = True, bbox_fmt: BoundingBoxFormat = BoundingBoxFormat.XYXY):
-        super(VHFlip, self).__init__()
-        self.bbox_fmt = bbox_fmt
-        self.vflip = vflip
-        self.hflip = hflip
+@dataclass
+class VHFlip(object):
+    hflip: bool = True
+    vflip: bool = True
+    bbox_fmt: BoundingBoxFormat = BoundingBoxFormat.XYXY
 
-    def forward(self, image: Union[_Image, _Tensor], bboxes: List[_Tensor] = None):
+    def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        image, bboxes = [data[key] for key in ['image', 'bboxes']]
+
         hflipper = TF.horizontal_flip_image_tensor if isinstance(image, torch.Tensor) else TF.horizontal_flip_image_pil
         vflipper = TF.vertical_flip_image_tensor if isinstance(image, torch.Tensor) else TF.vertical_flip_image_pil
 
         if self.hflip and np.random.choice([True, False]):
             image = hflipper(image)
             if bboxes is not None:
-                spatial_size = image.shape[:1] if isinstance(image, torch.Tensor) else image.size[::-1]
+                spatial_size = image.shape[1:]
                 bboxes = [TF.horizontal_flip_bounding_box(bbox, self.bbox_fmt, spatial_size) for bbox in bboxes]
 
         if self.vflip and np.random.choice([True, False]):
             image = vflipper(image)
             if bboxes is not None:
-                spatial_size = image.shape[:1] if isinstance(image, torch.Tensor) else image.size[::-1]
+                spatial_size = image.shape[1:]
                 bboxes = [TF.vertical_flip_bounding_box(bbox, self.bbox_fmt, spatial_size) for bbox in bboxes]
-        return image, bboxes
+
+        data['image'] = image
+        data['bboxes'] = bboxes
+        return data
 
 
 @transform_registry
-class ConvertFormatBoundingBox(nn.Module):
-    def __init__(self, old_fmt: str, new_fmt: str):
-        super(ConvertFormatBoundingBox, self).__init__()
-        self.old_fmt, self.new_fmt = [getattr(BoundingBoxFormat, fmt) for fmt in [old_fmt, new_fmt]]
+@dataclass
+class ConvertFormatBoundingBox(object):
+    old_fmt: str
+    new_fmt: str
 
-    def forward(self, image: _Image, bboxes: List[_Tensor]) -> Tuple[_Image, List[_Tensor]]:
+    def __post_init__(self):
+        self.old_fmt, self.new_fmt = [getattr(BoundingBoxFormat, fmt) for fmt in [self.old_fmt, self.new_fmt]]
+
+    def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        image, bboxes = [data[key] for key in ['image', 'bboxes']]
         convert_bounding_box_format = (
             TF.convert_format_bounding_box
             if version.minor_version(torchvision.__version__) < 16
             else TF.convert_bounding_box_format
         )
         bboxes = [convert_bounding_box_format(bbox, self.old_fmt, self.new_fmt) for bbox in bboxes]
-        return image, bboxes
+
+        data['image'] = image
+        data['bboxes'] = bboxes
+        return data
 
 
 @transform_registry
-class Normalize(nn.Module):
-    def __init__(
-        self,
-        mean: List[float] = [0.48145466, 0.4578275, 0.40821073],
-        std: List[float] = [0.26862954, 0.26130258, 0.27577711],
-    ) -> None:
-        super(Normalize, self).__init__()
-        self.mean = mean
-        self.std = std
+@dataclass
+class Normalize(object):
+    mean: List[float] = field(default_factory=lambda: [0.48145466, 0.4578275, 0.40821073])
+    std: List[float] = field(default_factory=lambda: [0.26862954, 0.26130258, 0.27577711])
 
-    def forward(self, image: _Image, bboxes: List[_Tensor] = None) -> Tuple[_Tensor, List[_Tensor]]:
+    def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        image, bboxes = [data[key] for key in ['image', 'bboxes']]
         image = TF.to_image_tensor(image).float() / 255.0
         image = TF.normalize(image, self.mean, self.std)
-        return image, bboxes
+
+        data['image'] = image
+        data['bboxes'] = bboxes
+        return data
 
 
 @transform_registry
-class ResizeToDivisible(nn.Module):
-    def __init__(self, factor: float):
-        super(ResizeToDivisible, self).__init__()
-        self.factor = factor
+@dataclass
+class ResizeToDivisible(object):
+    factor: float
 
-    def forward(self, image: _Image, bboxes: List[_Tensor]) -> Tuple[_Tensor, List[_Tensor]]:
-        w, h = image.size
+    def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        image, bboxes = [data[key] for key in ['image', 'bboxes']]
+        h, w = image.shape[1:]
         h, w = h - h % self.factor, w - w % self.factor
-        return Resize([h, w])(image, bboxes)
+        return Resize([h, w])(data)
+
+
+@transform_registry
+@dataclass
+class ArgumentNoisyBBoxes(object):
+    sample_size: int = 5
+    pos_ratio: float = 0.25
+    proposal_thresh: List[float] = field(default_factory=lambda: [0.3, 0.7])
+    labels: List[int] = field(default_factory=lambda: [0, -1, 1])
+    background_id: int = 0
+    batch_size_per_image: int = 128
+
+    def __post_init__(self):
+        self.proposal_matcher = Matcher(self.proposal_thresh, self.labels)
+
+    def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        if self.sample_size <= 0:
+            return data
+
+        image, gt_bboxes, class_ids, names = [
+            data[key] for key in ['image', 'bboxes', 'category_ids', 'category_names']
+        ]
+
+        gt_bboxes = [gt_bbox.reshape(-1, 4) for gt_bbox in gt_bboxes]
+        img_hw = image.shape[1:]
+        noisy_bboxes = prepare_noisy_boxes(gt_bboxes, img_hw, n=self.sample_size)
+        bboxes = torch.cat([torch.cat([gt_bboxes[i], noisy_bboxes[i]]) for i in range(len(gt_bboxes))])
+
+        match_quality_matrix = box_iou(torch.cat(gt_bboxes), bboxes)
+        matched_idxs, matched_labels = self.proposal_matcher(match_quality_matrix)
+        class_labels = class_ids[matched_idxs]
+
+        if len(class_labels) == 0:
+            # no annotation on this image
+            assert torch.all(matched_labels == 0)
+            class_labels = torch.zeros_like(matched_idxs)
+
+        class_labels[matched_labels == 0] = self.background_id
+        class_labels[matched_labels == -1] = -1
+
+        positive = ((class_labels != -1) & (class_labels != self.background_id)).nonzero().flatten()
+        negative = (class_labels == self.background_id).nonzero().flatten()
+
+        num_pos = int(self.batch_size_per_image * self.pos_ratio)
+        # protect against not enough positive examples
+        num_pos = min(positive.numel(), num_pos)
+        num_neg = self.batch_size_per_image - num_pos
+        # protect against not enough negative examples
+        num_neg = min(negative.numel(), num_neg)
+
+        perm1 = torch.randperm(positive.numel())[:num_pos]
+        perm2 = torch.randperm(negative.numel())[:num_neg]
+        pos_idx = positive[perm1]
+        neg_idx = negative[perm2]
+        sampled_idxs = torch.cat([pos_idx, neg_idx], dim=0)
+
+        bboxes = bboxes[sampled_idxs]
+        class_labels = class_labels[sampled_idxs]
+
+        mapping = {int(class_ids[i]): names[i] for i in range(len(class_ids))}
+        mapping[self.background_id] = 'background'
+        names = [mapping[int(i)] for i in class_labels]
+
+        data['image'] = image
+        data['bboxes'] = bboxes
+        data['category_ids'] = class_labels
+        data['category_names'] = names
+        return data

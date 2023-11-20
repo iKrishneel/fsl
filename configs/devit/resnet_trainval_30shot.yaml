@@ -1,0 +1,112 @@
+driver: torch
+device: "cuda"
+
+workdir:
+  path: "/tmp/fsl/resnet_vitb_coco2017/"
+  unique: False
+
+distributed:
+  backend: nccl
+  type: single  # single or multiple
+  nproc_per_node: 4
+  single:
+    init_method: tcp://127.0.0.1:23456
+
+models:
+  resnet_fsod: &model
+    roi_pool_size: 7
+    all_classes_fn: "../data/coco/all_classes.txt"
+    seen_classes_fn: "../data/coco/seen_classes.txt"
+    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_sam/fs_coco_trainval_novel_30shot.pkl"
+    background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_sam/background/panoptic_train2017_only_stuffs.pkl"
+  cie_fsod:
+    <<: *model
+    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/cie_fsod/fg/fs_coco_trainval_novel_30shot.pkl"
+    background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/cie_fsod/bg/panoptic_train2017_only_stuffs.pkl"
+  dinov2_fsod:
+    <<: *model
+    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/dinov2_fsod/fg/fs_coco_trainval_novel_30shot.pkl"
+    background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/dinov2_fsod/bg/panoptic_train2017_only_stuffs.pkl" 
+
+datasets:
+  dataloader:
+    batch_size: 16
+    num_workers: 16
+    shuffle: True
+    pin_memory: True
+    collate_fn: "collate_data_instances"
+  coco:
+    train:
+      bucket_name: &bucket "sr-shokunin"
+      root: "perception/datasets/coco/train2017"
+      anno_fn: "/root/krishneel/Downloads/fsl/fs_coco17_base_train.json"
+    val:
+      bucket_name: *bucket
+      root: "perception/datasets/coco/val2017"
+      anno_fn: "/root/krishneel/Downloads/fsl/fs_coco17_base_val.json"
+
+transforms:
+  train: &trans
+    engine: "torchvision.transforms"
+    ConvertFormatBoundingBox:
+      old_fmt: "XYWH"
+      new_fmt: "XYXY"
+    VHFlip:
+      hflip: False
+      vflip: False
+    ResizeLongestSide:
+      size: 896
+    PadToSize:
+      size: 896
+    ArgumentNoisyBBoxes:
+      background_id: -1
+    Normalize:
+      mean: [0.48145466, 0.4578275, 0.40821073]
+      std: [0.26862954, 0.26130258, 0.27577711]
+
+  val:
+    <<: *trans
+    VHFlip:
+      hflip: False
+      vflip: False
+    ArgumentNoisyBBoxes:
+      sample_size: 0
+
+solvers:
+  engine: "torch.optim"
+  snapshot: 5000
+
+  SGD:
+    lr: 0.001
+    momentum: 0.5
+  schedulers:
+    StepLR:
+      step_size: 10
+      gamma: 0.1
+
+io:
+  checkpoint:
+    engine: 's3_writer'
+    bucket_name: *bucket
+    root: "perception/models/fsl/resnet_vitb_coco17_30shot/"
+
+build:
+  resnet_fsod: &build
+    dataset: "coco"
+    train:
+      solver: "SGD"
+      scheduler: "StepLR"
+      epochs: 100
+    val:
+      func: "default_evaluation"
+      transforms: "val"
+  cie_fsod:
+    <<: *build
+  dinov2_fsod:
+    <<: *build
+
+  model: "resnet_fsod"
+
+options:
+  train: True
+  eval: False

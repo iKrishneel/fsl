@@ -1,0 +1,66 @@
+_base_: "resnet_trainval_30shot.yaml"
+
+workdir:
+  path: "/tmp/fsl/dinov2_fsod_coco2017/"
+  unique: False
+
+models:
+  dinov2_fsod:
+    roi_pool_size: 7
+    all_classes_fn: "../data/coco/all_classes.txt"
+    seen_classes_fn: "../data/coco/seen_classes.txt"    
+    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/dinov2_fsod/fg/fs_coco_trainval_novel_30shot.pkl"
+    background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/dinov2_fsod/bg/panoptic_train2017_only_stuffs.pkl"
+
+datasets:
+  dataloader:
+    batch_size: 16
+    num_workers: 16
+    collate_fn: "collate_data_instances"
+  coco:
+    train:
+      bucket_name: &bucket "sr-shokunin"
+      root: "perception/datasets/coco/train2017"
+      anno_fn: "/root/krishneel/Downloads/fsl/fs_coco17_base_train.json"
+    val:
+      bucket_name: *bucket
+      root: "perception/datasets/coco/val2017"
+      anno_fn: "/root/krishneel/Downloads/fsl/fs_coco17_base_val.json"
+
+transforms:
+  train: &trans
+    engine: "torchvision.transforms"
+    ConvertFormatBoundingBox:
+      old_fmt: "XYWH"
+      new_fmt: "XYXY"
+    ResizeLongestSide:
+      size: 1333
+    ResizeToDivisible:
+      factor: 14
+    Normalize:
+      mean: [0.48145466, 0.4578275, 0.40821073]
+      std: [0.26862954, 0.26130258, 0.27577711]
+  val:
+    <<: *trans
+
+io:
+  checkpoint:
+    root: "perception/models/fsl/dinov2_fsod_coco17_30shot/"
+
+build:
+  dinov2_fsod:
+    dataset: "coco"
+    transforms: "train"
+    train:
+      solver: "SGD"
+      scheduler: "StepLR"
+      epochs: 100
+    val:
+      func: "default_evaluation"
+      transforms: "val"
+
+  model: "dinov2_fsod"
+
+options:
+  train: True
+  eval: False

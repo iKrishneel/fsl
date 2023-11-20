@@ -4,12 +4,14 @@ import contextlib
 import io
 import json
 import os
+import re
 import time
 from typing import Any, Dict, List
 
 import numpy as np
 import torch
 import torchvision
+from torchvision.transforms.v2 import functional
 from omegaconf import DictConfig, OmegaConf
 from PIL import Image
 
@@ -19,7 +21,6 @@ from igniter.datasets import S3CocoDataset, S3Dataset
 from igniter.logger import logger
 from igniter.registry import dataset_registry, func_registry
 
-from fsl.structures import Instances
 from fsl.utils import version
 
 if version.minor_version(torchvision.__version__) <= 15:
@@ -115,9 +116,9 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
                     logger.warning(f'{e} for iid: {iid} index: {index}')
 
         # FIXME: Add targets transform parsing directly from config
-        category_ids = [
-            target['category_id'] for target in targets if np.all(np.array(target['bbox'][2:]) > self.min_bbox_size)
-        ]
+        category_ids = torch.IntTensor(
+            [target['category_id'] for target in targets if np.all(np.array(target['bbox'][2:]) > self.min_bbox_size)]
+        )
         # bboxes = [torch.Tensor(target['bbox']) for target in targets if np.all(np.array(target['bbox'][2:]) > 10)]
         category_names = [
             label_name_mapping[target['category_id']]
@@ -130,16 +131,18 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
         if image.mode != 'RBG':
             image = image.convert('RGB')
 
-        for transform in self.transforms.transforms:
-            image, bboxes = transform(image, bboxes)
+        image = functional.pil_to_tensor(image)
 
-        return {
+        data = {
             'image': image,
             'bboxes': bboxes,
             'category_ids': category_ids,
             'category_names': category_names,
             'image_ids': [iid],
         }
+
+        data = self.transforms(data)
+        return data
 
 
 @dataset_registry('fs_coco')
@@ -149,10 +152,19 @@ class S3CocoDatasetFS(S3CocoDataset):
         bucket_name: str,
         root: str,
         json_file: str,
-        shot: int = 5,
+        # shot: int = 5,
         filename_signature: str = 'full_box_%sshot_%s_trainval.json',
         **kwargs,
     ) -> None:
+        json_filename = os.path.splitext(os.path.basename(json_file))[0]
+        if 'shot' in json_filename:
+            match = re.search(r'\d+shot', json_filename)
+            assert match
+            shot = int(json_filename[match.start() : match.end()].replace('shot', ''))
+        else:
+            shot = kwargs.get('shot', None)
+            assert shot
+
         split_dir = os.path.join(os.path.dirname(json_file), 'cocosplit2017/seed1')
         assert os.path.isdir(split_dir), f'Directory not found {split_dir}'
         anno_dict = load_json(json_file)
@@ -236,11 +248,9 @@ class S3CocoDatasetFS(S3CocoDataset):
 
         assert len(bboxes) > 0, 'Empty bounding boxes'
 
-        if self.transforms is not None:
-            for transform in self.transforms.transforms:
-                image, bboxes = transform(image, bboxes)
+        image = functional.pil_to_tensor(image)
 
-        return {
+        data = {
             'image': image,
             'bboxes': bboxes,
             'category_ids': category_ids,
@@ -248,8 +258,13 @@ class S3CocoDatasetFS(S3CocoDataset):
             'category_names': category_names,
         }
 
+        if self.transforms is not None:
+            data = self.transforms(data)
 
-def load_coco(json_file):
+        return data
+
+
+def load_coco(json_file: str):
     from pycocotools.coco import COCO
 
     with contextlib.redirect_stdout(io.StringIO()):
@@ -273,6 +288,8 @@ def collate_data(batches: List[Dict[str, Any]]) -> List[Any]:
 
 @func_registry
 def collate_data_instances(batches: List[Dict[str, Any]]) -> List[Any]:
+    from fsl.structures import Instances
+
     images, targets = [], []
     for batch in batches:
         image = batch.pop('image')
