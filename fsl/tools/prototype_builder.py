@@ -92,7 +92,7 @@ def collate_and_write(
     engine, filename: str, clean: bool = True, reduction: str = 'per_class_avg', cluster_size: int = 10
 ) -> None:
     root = os.path.join(engine._cfg.io.file_io.root, engine._cfg.build.model)
-    _post_process_prototypes(root, filename, clean, per_class_avg)
+    _post_process_prototypes(root, filename, clean, reduction, cluster_size)
 
 
 def _post_process_prototypes(
