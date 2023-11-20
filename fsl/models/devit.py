@@ -536,22 +536,31 @@ class DeVitSam(DeVit):
         return [self.mask_generator.get_proposals(image) for image in images]
 
 
-def read_text_file(filename: str) -> List[str]:
-    with open(filename, 'r') as txt_file:
-        lines = txt_file.readlines()
-    return [line.strip('\n') for line in lines]
+# def read_text_file(filename: str) -> List[str]:
+#     with open(filename, 'r') as txt_file:
+#         lines = txt_file.readlines()
+#     return [line.strip('\n') for line in lines]
 
 
 def build_devit(
     prototype_file: str = None,
     background_prototype_file: str = None,
+    label_map_file: str = None,
     all_classes_fn: str = None,
     seen_classes_fn: str = None,
 ) -> DeVit:
-    if all_classes_fn and seen_classes_fn and prototype_file:
+    if label_map_file:
+        import json
+
+        with open(label_map_file, 'r') as jfile:
+            label_map = json.load(jfile)
+
+        all_cids = list(label_map['all_classes'].values())
+        seen_cids = list(label_map['seen_classes'].values())
+        breakpoint()
+
+    if prototype_file:
         prototypes = ProtoTypes.load(prototype_file)
-        all_cids = read_text_file(all_classes_fn)
-        seen_cids = read_text_file(seen_classes_fn)
     else:
         prototypes, all_cids, seen_cids = None, None, None
 
@@ -564,20 +573,27 @@ def build_devit_sam(
     roi_pool_size: int = 16,
     prototype_file: str = None,
     background_prototype_file: str = None,
-    all_classes_fn: str = None,
-    seen_classes_fn: str = None,
+    label_map_file: str = None,
 ) -> DeVitSam:
     proposal_matcher = Matcher([0.3, 0.7], [0, -1, 1])
 
-    if all_classes_fn and seen_classes_fn and prototype_file:
+    if label_map_file:
+        import json
+
+        with open(label_map_file, 'r') as jfile:
+            label_map = json.load(jfile)
+
+        all_cids = list(label_map['all_classes'].values())
+        seen_cids = list(label_map['seen_classes'].values())
+        breakpoint()
+
+    if prototype_file:
         prototypes = ProtoTypes.load(prototype_file)
-        all_cids = read_text_file(all_classes_fn)
-        seen_cids = read_text_file(seen_classes_fn)
     else:
         prototypes, all_cids, seen_cids = None, None, None
 
     bg_prototypes = ProtoTypes.load(background_prototype_file) if background_prototype_file else None
-    return DeVitSam(generator, proposal_matcher, roi_pool_size, prototypes, bg_prototypes, all_cids, seen_cids)
+    return DeVitSam(generator, proposal_matcher, roi_pool_size, prototypes, bg_prototypes, label_map_file)
 
 
 @model_registry
@@ -587,8 +603,7 @@ def devit_sam(
     roi_pool_size: int = 16,
     prototype_file: str = None,
     background_prototype_file: str = None,
-    all_classes_fn: str = None,
-    seen_classes_fn: str = None,
+    label_map_file: str = None,
 ) -> DeVitSam:
     from fsl.models.sam_relational import build_sam_auto_mask_generator
 
@@ -598,6 +613,5 @@ def devit_sam(
         roi_pool_size,
         prototype_file,
         background_prototype_file,
-        all_classes_fn,
-        seen_classes_fn,
+        label_map_file,
     )

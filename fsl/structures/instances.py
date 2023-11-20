@@ -38,13 +38,13 @@ class Instances(object):
     def __post_init__(self):
         size = max(len(self.bboxes), self.masks.shape[0] if self.masks is not None else 0, len(self.class_ids))
         if len(self.bboxes) > 0:
-            assert len(self.bboxes) == size
+            assert len(self.bboxes) == size, f'Incorect size {len(self.bboxes)} != {size}'
         if len(self.class_ids) > 0:
-            assert len(self.class_ids) == size
+            assert len(self.class_ids) == size, f'Incorect size {len(self.class_ids)} != {size}'
         if self.labels:
-            assert len(self.labels) == size
+            assert len(self.labels) == size, f'Incorect size {len(self.labels)} != {size}'
         if self.masks is not None:
-            assert self.masks.shape[0] == size
+            assert self.masks.shape[0] == size, f'Incorect size {len(self.masks)} != {size}'
 
     def convert_bbox_fmt(self, bbox_fmt: BoundingBoxFormat) -> 'Instances':
         assert len(self.bboxes) > 0, 'No bounding box instance'

@@ -12,8 +12,7 @@ models:
   devit_dinov2_fsod:
     model_name: "dinov2_vitb14"
     roi_pool_size: 7
-    all_classes_fn: "../data/coco/all_classes.txt"
-    seen_classes_fn: "../data/coco/seen_classes.txt"
+    label_map_file: "../../data/coco/label_mapping.json"
     prototype_file: "/root/krishneel/Downloads/fsl/prototypes/dinov2/coco14/fs_coco14_trainval_base_30shot_vitb14.pkl"
     background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/dinov2/coco14/background_prototypes_vitb14.pkl"
 

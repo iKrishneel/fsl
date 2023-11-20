@@ -29,9 +29,10 @@ datasets:
       bucket_name: "sr-shokunin"
       root: "perception/datasets/coco/train2017"
       json_file: "/root/krishneel/Downloads/coco/fs_coco_trainval_novel_30shot.json"
+      label_map_file: "../../../data/coco/label_mapping.json"
 
 transforms:
-  trans1: &trans
+  trans: &trans
     engine: "torchvision.transforms"
     ConvertFormatBoundingBox:
       old_fmt: "XYWH"
@@ -71,6 +72,8 @@ build:
         collate_and_write:
           event_type: COMPLETED
           filename: "fs_coco_trainval_novel_30shot.pkl"
+          reduction: "per_class_cluster"
+          cluster_size: 10
   resnet_fsod:
     <<: *setup
   resnet_clip_fsod:

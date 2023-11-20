@@ -80,13 +80,12 @@ def _build_fsod(
     roi_pool_size: int = 16,
     prototype_file: str = None,
     background_prototype_file: str = None,
-    all_classes_fn: str = None,
-    seen_classes_fn: str = None,
+    label_map_file: str = None,
 ) -> FSOD:
     from fsl.models.devit import build_devit
 
     roi_pooler = RoIAlign(roi_pool_size, spatial_scale=1 / mask_generator.downsize, sampling_ratio=-1)
-    classifier = build_devit(prototype_file, background_prototype_file, all_classes_fn, seen_classes_fn)
+    classifier = build_devit(prototype_file, background_prototype_file, label_map_file)
 
     return FSOD(mask_generator, classifier, roi_pooler)
 
@@ -98,8 +97,7 @@ def build_sam_fsod(
     roi_pool_size: int = 16,
     prototype_file: str = None,
     background_prototype_file: str = None,
-    all_classes_fn: str = None,
-    seen_classes_fn: str = None,
+    label_map_file: str = None,
 ) -> FSOD:
     from fsl.models.sam_relational import build_sam_auto_mask_generator
 
@@ -109,8 +107,7 @@ def build_sam_fsod(
         roi_pool_size,
         prototype_file,
         background_prototype_file,
-        all_classes_fn,
-        seen_classes_fn,
+        label_map_file,
     )
 
 
@@ -119,8 +116,7 @@ def build_resnet_fsod(
     roi_pool_size: int = 16,
     prototype_file: str = None,
     background_prototype_file: str = None,
-    all_classes_fn: str = None,
-    seen_classes_fn: str = None,
+    label_map_file: str = None,
 ) -> FSOD:
     from timm.models import resnet50
 
@@ -154,8 +150,7 @@ def build_resnet_fsod(
         roi_pool_size,
         prototype_file,
         background_prototype_file,
-        all_classes_fn,
-        seen_classes_fn,
+        label_map_file,
     )
 
 
@@ -165,8 +160,7 @@ def build_cie_fsod(
     roi_pool_size: int = 16,
     prototype_file: str = None,
     background_prototype_file: str = None,
-    all_classes_fn: str = None,
-    seen_classes_fn: str = None,
+    label_map_file: str = None,
 ) -> FSOD:
     import clip
 
@@ -229,8 +223,7 @@ def build_cie_fsod(
         roi_pool_size,
         prototype_file,
         background_prototype_file,
-        all_classes_fn,
-        seen_classes_fn,
+        label_map_file,
     )
 
 
@@ -240,8 +233,7 @@ def build_dinov2_fsod(
     roi_pool_size: int = 16,
     prototype_file: str = None,
     background_prototype_file: str = None,
-    all_classes_fn: str = None,
-    seen_classes_fn: str = None,
+    label_map_file: str = None,
 ) -> FSOD:
     class DinoV2Patch(nn.Module):
         def __init__(self, backbone):
@@ -269,9 +261,7 @@ def build_dinov2_fsod(
 
     backbone = backbone.to(torch.float16)
 
-    return _build_fsod(
-        DinoV2Patch(backbone), roi_pool_size, prototype_file, background_prototype_file, all_classes_fn, seen_classes_fn
-    )
+    return _build_fsod(DinoV2Patch(backbone), roi_pool_size, prototype_file, background_prototype_file, label_map_file)
 
 
 @model_registry
@@ -280,8 +270,7 @@ def devit_dinov2_fsod(
     roi_pool_size: int = 7,
     prototype_file: str = None,
     background_prototype_file: str = None,
-    all_classes_fn: str = None,
-    seen_classes_fn: str = None,
+    label_map_file: str = None,
 ) -> FSOD:
     backbone = torch.hub.load('facebookresearch/dinov2', model_name)
 
@@ -293,7 +282,7 @@ def devit_dinov2_fsod(
         @torch.no_grad()
         def forward(self, image: _Tensor) -> _Tensor:
             im_dtype = image.dtype
-            image = image.to(self.dtype)
+            image = image.to(self.device).to(self.dtype)
             outputs = self.backbone.get_intermediate_layers(image, n=[self.backbone.n_blocks - 1], reshape=True)
             return outputs[0].to(im_dtype) if self.training else outputs[0]
 
@@ -317,6 +306,5 @@ def devit_dinov2_fsod(
         roi_pool_size,
         prototype_file,
         background_prototype_file,
-        all_classes_fn,
-        seen_classes_fn,
+        label_map_file,
     )

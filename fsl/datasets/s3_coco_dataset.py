@@ -17,6 +17,8 @@ from PIL import Image
 
 torchvision.disable_beta_transforms_warning()
 
+from pycocotools.mask import decode
+
 from igniter.datasets import S3CocoDataset, S3Dataset
 from igniter.logger import logger
 from igniter.registry import dataset_registry, func_registry
@@ -95,11 +97,24 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
         label_name_mapping = {v['id']: v['name'] for v in self.coco.dataset['categories']}
+        target_mask_decoder = (
+            lambda target: decode(target['segmentation'])
+            if isinstance(target['segmentation'], dict)
+            else target['segmentation']
+        )
 
         while True:
             try:
                 iid = self.ids[index]
                 image, targets = self._load(iid)
+                masks = torch.stack(
+                    [
+                        torch.as_tensor(target_mask_decoder(target))
+                        for target in targets
+                        if np.all(np.array(target['bbox'][2:]) > self.min_bbox_size)
+                    ]
+                )
+
                 assert len(targets) > 0, 'No target(s) found!'
 
                 bboxes = [
@@ -114,6 +129,8 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
                 index = np.random.choice(np.arange(len(self.ids)))
                 if not isinstance(e, AssertionError):
                     logger.warning(f'{e} for iid: {iid} index: {index}')
+
+        assert len(masks) == len(bboxes), 'bboxes and masks are not same lenght'
 
         # FIXME: Add targets transform parsing directly from config
         category_ids = torch.IntTensor(
@@ -136,6 +153,7 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
         data = {
             'image': image,
             'bboxes': bboxes,
+            'masks': masks,
             'category_ids': category_ids,
             'category_names': category_names,
             'image_ids': [iid],
@@ -152,7 +170,7 @@ class S3CocoDatasetFS(S3CocoDataset):
         bucket_name: str,
         root: str,
         json_file: str,
-        # shot: int = 5,
+        label_map_file: str,
         filename_signature: str = 'full_box_%sshot_%s_trainval.json',
         **kwargs,
     ) -> None:
@@ -169,9 +187,23 @@ class S3CocoDatasetFS(S3CocoDataset):
         assert os.path.isdir(split_dir), f'Directory not found {split_dir}'
         anno_dict = load_json(json_file)
 
-        anno_dict.thing_classes = anno_dict.base_classes
-        anno_dict.thing_dataset_id_to_contiguous_id = anno_dict.base_dataset_id_to_contiguous_id
+        coco_label_map = load_json(label_map_file)['all_classes']
+        anno_dict.thing_classes = list(coco_label_map.values())
+        anno_dict.thing_dataset_id_to_contiguous_id = {k: i for i, k in enumerate(coco_label_map.keys())}
+        # anno_dict.thing_classes = anno_dict.base_classes
+        # anno_dict.thing_dataset_id_to_contiguous_id = anno_dict.base_dataset_id_to_contiguous_id
 
+        dataset = self._prepare_data_catalog(anno_dict, shot, split_dir, filename_signature)
+
+        anno_fn = '/tmp/fs_coco_anno.json'
+        with open(anno_fn, 'w') as json_file:
+            json.dump(dataset, json_file)
+        super(S3CocoDatasetFS, self).__init__(bucket_name, root, anno_fn, **kwargs)
+        self.apply_transforms = False
+
+        # import IPython, sys; IPython.embed(); sys.exit()
+
+    def _prepare_data_catalog(self, anno_dict, shot: int, split_dir: str, filename_signature: str):
         fileids = {}
         for idx, class_name in enumerate(anno_dict.thing_classes):
             filename = os.path.join(split_dir, filename_signature % (shot, class_name))
@@ -198,8 +230,6 @@ class S3CocoDatasetFS(S3CocoDataset):
                     assert anno.get('ignore', 0) == 0
 
                     obj = {key: anno[key] for key in ann_keys if key in anno}
-
-                    # obj['bbox_mode'] = BoundingBoxFormat.XYWH.name
                     category_id = anno_dict.thing_dataset_id_to_contiguous_id[str(obj['category_id'])]
 
                     obj['category_name'] = anno_dict.thing_classes[category_id]
@@ -232,12 +262,7 @@ class S3CocoDatasetFS(S3CocoDataset):
                 anno_id += 1
 
         dataset = {'images': images, 'annotations': annotations, 'categories': categories}
-
-        anno_fn = '/tmp/fs_coco_anno.json'
-        with open(anno_fn, 'w') as json_file:
-            json.dump(dataset, json_file)
-        super(S3CocoDatasetFS, self).__init__(bucket_name, root, anno_fn, **kwargs)
-        self.apply_transforms = False
+        return dataset
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
         image, targets = super().__getitem__(index)

@@ -41,6 +41,9 @@ class ResizeLongestSide(object):
         target_size = self.get_preprocess_shape(*img_hw, self.size)
         image = TF.resize(image, target_size)
 
+        if 'masks' in data:
+            data['masks'] = TF.resize(data['masks'], target_size, interpolation=TF.InterpolationMode.NEAREST)
+
         if bboxes is not None:
             bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=target_size)[0] for bbox in bboxes]
 
@@ -91,6 +94,9 @@ class Resize(object):
         img_hw = image.shape[1:]
         image = TF.resize(image, self.size)
 
+        if 'masks' in data:
+            data['masks'] = TF.resize(data['masks'], self.size, interpolation=TF.InterpolationMode.NEAREST)
+
         if bboxes is not None:
             bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=image.shape[1:])[0] for bbox in bboxes]
 
@@ -112,6 +118,10 @@ class PadToSize(object):
         # LRTB --> LTRB
         padding = (0, 0, self.size - img_hw[1], self.size - img_hw[0])
         image = TF.pad_image_tensor(image, padding)
+
+        if 'masks' in data:
+            data['masks'] = TF.pad_image_tensor(data['masks'], padding)
+
         if bboxes is not None:
             bboxes = [TF.pad_bounding_box(bbox, self.bbox_fmt, img_hw, padding)[0] for bbox in bboxes]
 
@@ -129,24 +139,32 @@ class VHFlip(object):
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
         image, bboxes = [data[key] for key in ['image', 'bboxes']]
+        mask = data.get('masks', None)
 
         hflipper = TF.horizontal_flip_image_tensor if isinstance(image, torch.Tensor) else TF.horizontal_flip_image_pil
         vflipper = TF.vertical_flip_image_tensor if isinstance(image, torch.Tensor) else TF.vertical_flip_image_pil
 
         if self.hflip and np.random.choice([True, False]):
             image = hflipper(image)
+            mask = hflipper(mask) if mask is not None else mask
+
             if bboxes is not None:
                 spatial_size = image.shape[1:]
                 bboxes = [TF.horizontal_flip_bounding_box(bbox, self.bbox_fmt, spatial_size) for bbox in bboxes]
 
         if self.vflip and np.random.choice([True, False]):
             image = vflipper(image)
+            mask = vflipper(mask) if mask is not None else mask
             if bboxes is not None:
                 spatial_size = image.shape[1:]
                 bboxes = [TF.vertical_flip_bounding_box(bbox, self.bbox_fmt, spatial_size) for bbox in bboxes]
 
         data['image'] = image
         data['bboxes'] = bboxes
+
+        if mask is not None:
+            data['masks'] = mask
+
         return data
 
 
