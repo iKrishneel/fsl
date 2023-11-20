@@ -557,7 +557,6 @@ def build_devit(
 
         all_cids = list(label_map['all_classes'].values())
         seen_cids = list(label_map['seen_classes'].values())
-        breakpoint()
 
     if prototype_file:
         prototypes = ProtoTypes.load(prototype_file)

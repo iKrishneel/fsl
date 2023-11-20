@@ -123,14 +123,13 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
                     if np.all(np.array(target['bbox'][2:]) > self.min_bbox_size)
                 ]
                 assert len(bboxes) > 0, 'No bounding box found!'
+                assert len(masks) == len(bboxes), 'bboxes and masks are not same lenght'
 
                 break
             except Exception as e:
                 index = np.random.choice(np.arange(len(self.ids)))
                 if not isinstance(e, AssertionError):
                     logger.warning(f'{e} for iid: {iid} index: {index}')
-
-        assert len(masks) == len(bboxes), 'bboxes and masks are not same lenght'
 
         # FIXME: Add targets transform parsing directly from config
         category_ids = torch.IntTensor(
