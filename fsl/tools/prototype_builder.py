@@ -2,7 +2,7 @@
 
 import os
 import pickle
-from typing import Any, Callable, Dict, Type
+from typing import Any, Callable, Dict, Type, List
 
 import torch
 from igniter.logger import logger
@@ -40,7 +40,32 @@ def prototype_forward(engine, batch) -> None:
             masks=instances.get('masks', None),
             image_id=image_ids,
         )
-        prototypes = engine._model.build_image_prototypes(image, instances)
+
+        def bboxes2mask(bboxes: torch.Tensor, img_hw: List[int]) -> torch.Tensor:
+            mask = torch.zeros(len(bboxes), *img_hw)
+            # boxes = torch.round(bboxes).long()
+            for i in range(len(bboxes)):
+                x1, y1, x2, y2 = torch.round(bboxes[i]).int()
+                mask[i, y1:y2, x1:x2] = 1
+            return mask.to(torch.uint8)
+
+        features = engine._model.mask_generator(image[None])
+        masks = bboxes2mask(instances.bboxes, image.shape[1:])
+        masks = torch.nn.functional.interpolate(masks[None], features.shape[2:], mode='nearest')[0]
+        masks = masks.to(torch.bool).to(features.device)
+
+        features = features[0]
+        labels = [instances.labels[i] for i, mask in enumerate(masks) if mask.sum() > 0]
+
+        if len(labels) == 0:
+            return
+
+        tokens = torch.stack([(features * mask).flatten(1).sum(1) / mask.sum() for mask in masks if mask.sum() > 0])
+        if len(tokens.shape) != 2:
+            breakpoint()
+
+        prototypes = ProtoTypes(tokens, labels=labels)
+        # prototypes = engine._model.build_image_prototypes(image, instances)
         engine.file_io(prototypes, image_ids[0], engine._cfg.build.model)
 
 
@@ -113,7 +138,7 @@ def _post_process_prototypes(
             logger.info(f'Skipping {p_file}')
             continue
         pt = _load_pickle(fn)
-        prototypes = pt if i == 0 else prototypes + pt
+        prototypes = pt if prototypes is None else prototypes + pt
         valid_files.append(fn)
 
     logger.info(f'Found {len(valid_files)} prototypes')
@@ -174,5 +199,5 @@ if __name__ == '__main__':
     from fsl.datasets.s3_coco_dataset import collate_data  # NOQA
     from fsl.models.devit import devit_sam  # NOQA
 
-    initiate('../../configs/devit/prototypes/foreground_prototypes.yaml')
+    # initiate('../../configs/devit/prototypes/foreground_prototypes.yaml')
     initiate('../../configs/devit/prototypes/background_prototypes.yaml')

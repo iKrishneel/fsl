@@ -6,6 +6,7 @@ datasets:
       bucket_name: "sr-shokunin"
       root: "perception/datasets/coco/train2017"
       anno_fn: "/root/krishneel/Downloads/coco/panoptic_train2017_only_stuffs.json"
+      use_mask: True
 
 io:
   file_io:

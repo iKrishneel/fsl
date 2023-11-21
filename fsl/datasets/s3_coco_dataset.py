@@ -94,25 +94,29 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
     def __init__(self, *args, **kwargs):
         super(S3CocoDatasetFSLEpisode, self).__init__(*args, **kwargs)
         self.min_bbox_size = kwargs.get('min_bbox_size', 10)
+        self.use_mask = kwargs.get('use_mask', False)
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
         label_name_mapping = {v['id']: v['name'] for v in self.coco.dataset['categories']}
         target_mask_decoder = (
             lambda target: decode(target['segmentation'])
             if isinstance(target['segmentation'], dict)
-            else target['segmentation']
+            else self.coco.annToMask(target)
         )
 
         while True:
             try:
                 iid = self.ids[index]
                 image, targets = self._load(iid)
-                masks = torch.stack(
+
+                masks = (
                     [
                         torch.as_tensor(target_mask_decoder(target))
                         for target in targets
                         if np.all(np.array(target['bbox'][2:]) > self.min_bbox_size)
                     ]
+                    if self.use_mask
+                    else None
                 )
 
                 assert len(targets) > 0, 'No target(s) found!'
@@ -123,7 +127,10 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
                     if np.all(np.array(target['bbox'][2:]) > self.min_bbox_size)
                 ]
                 assert len(bboxes) > 0, 'No bounding box found!'
-                assert len(masks) == len(bboxes), 'bboxes and masks are not same lenght'
+
+                if masks:
+                    assert len(masks) == len(bboxes), 'bboxes and masks are not same lenght'
+                    masks = torch.stack(masks)
 
                 break
             except Exception as e:
@@ -152,11 +159,13 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
         data = {
             'image': image,
             'bboxes': bboxes,
-            'masks': masks,
             'category_ids': category_ids,
             'category_names': category_names,
             'image_ids': [iid],
         }
+
+        if self.use_mask:
+            data['masks'] = masks
 
         data = self.transforms(data)
         return data

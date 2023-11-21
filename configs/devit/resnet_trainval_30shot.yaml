@@ -68,6 +68,8 @@ transforms:
     VHFlip:
       hflip: False
       vflip: False
+    ResizeLongestSide:
+      size: 1024
     ArgumentNoisyBBoxes:
       sample_size: 0
 
