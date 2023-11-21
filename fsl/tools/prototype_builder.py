@@ -199,5 +199,5 @@ if __name__ == '__main__':
     from fsl.datasets.s3_coco_dataset import collate_data  # NOQA
     from fsl.models.devit import devit_sam  # NOQA
 
-    # initiate('../../configs/devit/prototypes/foreground_prototypes.yaml')
+    initiate('../../configs/devit/prototypes/foreground_prototypes.yaml')
     initiate('../../configs/devit/prototypes/background_prototypes.yaml')
