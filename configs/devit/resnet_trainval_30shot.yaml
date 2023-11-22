@@ -70,6 +70,8 @@ transforms:
       vflip: False
     ResizeLongestSide:
       size: 1024
+    PadToSize:
+      size: 896      
     ArgumentNoisyBBoxes:
       sample_size: 0
 

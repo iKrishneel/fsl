@@ -64,7 +64,7 @@ def prototype_forward(engine, batch) -> None:
         if len(tokens.shape) != 2:
             breakpoint()
 
-        prototypes = ProtoTypes(tokens, labels=labels)
+        prototypes = ProtoTypes(tokens.float(), labels=labels)
         # prototypes = engine._model.build_image_prototypes(image, instances)
         engine.file_io(prototypes, image_ids[0], engine._cfg.build.model)
 
@@ -95,7 +95,7 @@ def bg_prototype_forward(engine, batch) -> None:
                 continue
             bg_tokens = compress(bg_tokens, n_clst=5)
             labels = [instances.labels[i]] * bg_tokens.shape[0]
-            pt = ProtoTypes(embeddings=bg_tokens, labels=labels)
+            pt = ProtoTypes(embeddings=bg_tokens.float(), labels=labels)
             prototypes = pt if prototypes is None else prototypes + pt
         engine.file_io(prototypes, image_ids[0], engine._cfg.build.model)
 
@@ -121,7 +121,7 @@ def collate_and_write(
 
 
 def _post_process_prototypes(
-    root: str, filename: str, clean: bool = False, reduction: str = 'per_class_avg', cluster_size: int = 1000
+    root: str, filename: str, clean: bool = False, reduction: str = 'per_class_avg', cluster_size: int = 1
 ) -> ProtoTypes:
     def _load_pickle(filename: str) -> ProtoTypes:
         with open(filename, 'rb') as pfile:
@@ -161,8 +161,8 @@ def _post_process_prototypes(
             assert cluster_size > 0
             prototypes = None
             for key, embeddings in average_embeddings.items():
-                embeddings = compress(torch.cat(embeddings, dim=0), cluster_size).mean(0)[None]
-                pt = ProtoTypes(embeddings, [key])
+                embeddings = compress(torch.cat(embeddings, dim=0), cluster_size)
+                pt = ProtoTypes(embeddings, [key] * embeddings.shape[0])
                 prototypes = pt if prototypes is None else prototypes + pt
         prototypes.save(filename)
     elif reduction == 'inter_class_avg':

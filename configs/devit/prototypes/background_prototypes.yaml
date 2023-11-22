@@ -22,8 +22,8 @@ build:
         collate_and_write:
           filename: "panoptic_train2017_only_stuffs.pkl"
           clean: True
-          reduction: "inter_class_avg"
-          cluster_size: 1000
+          reduction: "per_class_cluster"
+          cluster_size: 10
   resnet_fsod:
     <<: *setup
   cie_fsod:
