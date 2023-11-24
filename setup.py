@@ -20,16 +20,24 @@ install_requires = [
     'tqdm',
     'pytest',
     'igniter==0.0.4',
-    'segment-anything',
 ]
-
 
 setup(
     name='fsl',
-    version='0.0.0',
+    version='0.0.1',
     long_description=readme,
     packages=find_packages(),
     zip_safe=False,
     install_requires=install_requires,
     test_suite='tests',
+    extras_require={
+        'clip': [
+            'clip @ git+https://github.com/openai/CLIP.git',
+            'timm',
+            'segment-anything',
+        ],
+        'dev': [
+            'jupyterlab',
+        ]
+    }
 )

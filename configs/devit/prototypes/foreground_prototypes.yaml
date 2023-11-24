@@ -74,6 +74,7 @@ build:
           filename: "fs_coco_trainval_novel_30shot.pkl"
           reduction: "per_class_cluster"
           cluster_size: 10
+          clean: False
   resnet_fsod:
     <<: *setup
   resnet_clip_fsod:
