@@ -60,6 +60,7 @@ io:
   file_io:
     engine: 'prototype_writer'
     root: "/root/krishneel/Downloads/fsl/prototypes/"
+    folder_name: "fg"
 
 build:
   mode: "val"
@@ -72,7 +73,7 @@ build:
         collate_and_write:
           event_type: COMPLETED
           filename: "fs_coco_trainval_novel_30shot.pkl"
-          reduction: "per_class_cluster"
+          reduction: "per_class_avg"
           cluster_size: 10
           clean: False
   resnet_fsod:

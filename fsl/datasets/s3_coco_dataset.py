@@ -11,17 +11,16 @@ from typing import Any, Dict, List
 import numpy as np
 import torch
 import torchvision
-from torchvision.transforms.v2 import functional
 from omegaconf import DictConfig, OmegaConf
 from PIL import Image
+from torchvision.transforms.v2 import functional
 
 torchvision.disable_beta_transforms_warning()
-
-from pycocotools.mask import decode
 
 from igniter.datasets import S3CocoDataset, S3Dataset
 from igniter.logger import logger
 from igniter.registry import dataset_registry, func_registry
+from pycocotools.mask import decode
 
 from fsl.utils import version
 

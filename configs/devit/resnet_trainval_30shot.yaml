@@ -16,8 +16,8 @@ models:
   resnet_fsod: &model
     roi_pool_size: 7
     label_map_file: "../../data/coco/label_mapping.json"
-    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/resnet_fsod/fs_coco_trainval_novel_30shot.pkl"
-    background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/resnet_fsod/panoptic_train2017_only_stuffs.pkl"
+    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/resnet_fsod/fg/fs_coco_trainval_novel_30shot.pkl"
+    background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/resnet_fsod/bg/background_prototypes_vitb14.pkl"
   cie_fsod:
     <<: *model
     prototype_file: "/root/krishneel/Downloads/fsl/prototypes/cie_fsod/fg/fs_coco_trainval_novel_30shot.pkl"
@@ -54,9 +54,9 @@ transforms:
       hflip: False
       vflip: False
     ResizeLongestSide:
-      size: 896
+      size: 1024
     PadToSize:
-      size: 896
+      size: 1024
     ArgumentNoisyBBoxes:
       background_id: -1
     Normalize:

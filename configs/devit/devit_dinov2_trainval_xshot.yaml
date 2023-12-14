@@ -2,7 +2,7 @@ _base_: "sam_vitb_trainval_30shot.yaml"
 device: "cuda"
 
 workdir:
-  path: "/tmp/fsl/devit_dinov2/"
+  path: "/tmp/fsl/devit_dinov2_fsod/"
   unique: False
 
 distributed:
@@ -13,13 +13,15 @@ models:
     model_name: "dinov2_vitb14"
     roi_pool_size: 7
     label_map_file: "../../data/coco/label_mapping.json"
-    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/dinov2/coco14/fs_coco14_trainval_base_30shot_vitb14.pkl"
-    background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/dinov2/coco14/background_prototypes_vitb14.pkl"
+    # prototype_file: "/root/krishneel/Downloads/fsl/prototypes/dinov2/coco14/fs_coco14_trainval_base_30shot_vitb14.pkl"
+    # background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/dinov2/coco14/background_prototypes_vitb14.pkl"
+    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_dinov2_fsod/fg/fs_coco14_trainval_base_30shot_vitb14.pkl"
+    background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_dinov2_fsod/bg/background_prototypes_vitb14.pkl"
 
 datasets:
   dataloader:
-    batch_size: 1
-    num_workers: 1
+    batch_size: 8
+    num_workers: 12
 
 transforms:
   dinov2_trans:
@@ -28,7 +30,9 @@ transforms:
       old_fmt: "XYWH"
       new_fmt: "XYXY"
     ResizeLongestSide:
-      size: 1333
+      size: 1024
+    PadToSize:
+      size: 1024
     ResizeToDivisible:
      factor: 14
     # Resize:
@@ -41,13 +45,13 @@ transforms:
 
 io:
   checkpoint:
-    root: "perception/models/fsl/devit_dinov2"
+    root: "perception/models/fsl/devit_dinov2_fsod/"
 
 build:
   mode: "train"
   devit_dinov2_fsod:
     dataset: "coco"
-    weights: "/root/krishneel/Downloads/fsl/weights/devit_dinov2_fsod_vitb14.pth"
+    # weights: "/root/krishneel/Downloads/fsl/weights/devit_dinov2_fsod_vitb14.pth"
     transforms: "dinov2_trans"
     train:
       solver: "SGD"
@@ -61,5 +65,5 @@ build:
   model: "devit_dinov2_fsod"
 
 options:
-  train: False
-  eval: True
+  train: True
+  eval: False

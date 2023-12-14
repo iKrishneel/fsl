@@ -8,22 +8,42 @@ datasets:
       anno_fn: "/root/krishneel/Downloads/coco/panoptic_train2017_only_stuffs.json"
       use_mask: True
 
+transforms:
+  bg_trans:
+    ConvertFormatBoundingBox:
+      old_fmt: "XYWH"
+      new_fmt: "XYXY"
+    VHFlip:
+      hflip: True
+      vflip: True
+    ResizeLongestSide:
+      size: 1024
+    PadToSize:
+      size: 1024
+    ResizeToDivisible:
+      factor: 14
+    Normalize:
+      mean: [0.48145466, 0.4578275, 0.40821073]
+      std: [0.26862954, 0.26130258, 0.27577711]
+
 io:
   file_io:
     root: "/root/krishneel/Downloads/fsl/prototypes/"
-    per_class_avg: False
+    folder_name: "bg"
 
 build:
   sam_fsod: &setup
     dataset: "coco"
     val:
+      epochs: 5
       func: "bg_prototype_forward"
+      transforms: "trans"
       event_handlers:
         collate_and_write:
           filename: "panoptic_train2017_only_stuffs.pkl"
-          clean: True
           reduction: "per_class_cluster"
           cluster_size: 10
+          clean: False
   resnet_fsod:
     <<: *setup
   cie_fsod:

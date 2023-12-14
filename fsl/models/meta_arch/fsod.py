@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-from typing import Any, Dict, List, Type, Tuple, Union
+from typing import Any, Dict, List, Tuple, Type, Union
 
 import torch
 import torch.nn as nn

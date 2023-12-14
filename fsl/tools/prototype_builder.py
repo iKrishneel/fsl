@@ -2,11 +2,11 @@
 
 import os
 import pickle
-from typing import Any, Callable, Dict, Type, List
+from typing import Any, Callable, Dict, List, Type
 
 import torch
-from igniter.logger import logger
 from igniter.engine import EvaluationEngine
+from igniter.logger import logger
 from igniter.registry import engine_registry, event_registry, func_registry, io_registry
 from PIL import Image
 
@@ -19,11 +19,12 @@ _Image = Type[Image.Image]
 @io_registry('prototype_writer')
 def file_writer(io_cfg: Dict[str, str]) -> Callable:
     root = io_cfg.root
+    folder_name = io_cfg.folder_name
 
-    def write(prototypes: ProtoTypes, iid: str, folder_name: str) -> None:
-        write_path = os.path.join(root, folder_name)
+    def write(prototypes: ProtoTypes, iid: str, model_name: str, prefix: str = '') -> None:
+        write_path = os.path.join(root, model_name, folder_name)
         os.makedirs(write_path, exist_ok=True)
-        write_path = os.path.join(write_path, f'{str(iid).zfill(12)}.pkl')
+        write_path = os.path.join(write_path, f'{prefix}{str(iid).zfill(12)}.pkl')
         prototypes.save(write_path)
 
     return write
@@ -97,7 +98,8 @@ def bg_prototype_forward(engine, batch) -> None:
             labels = [instances.labels[i]] * bg_tokens.shape[0]
             pt = ProtoTypes(embeddings=bg_tokens.float(), labels=labels)
             prototypes = pt if prototypes is None else prototypes + pt
-        engine.file_io(prototypes, image_ids[0], engine._cfg.build.model)
+
+        engine.file_io(prototypes, image_ids[0], engine._cfg.build.model, prefix=str(engine.state.epoch) + '_')
 
 
 def compress(tensor, n_clst=5):
@@ -116,7 +118,7 @@ def compress(tensor, n_clst=5):
 def collate_and_write(
     engine, filename: str, clean: bool = True, reduction: str = 'per_class_avg', cluster_size: int = 10
 ) -> None:
-    root = os.path.join(engine._cfg.io.file_io.root, engine._cfg.build.model)
+    root = os.path.join(engine._cfg.io.file_io.root, engine._cfg.build.model, engine._cfg.io.file_io.folder_name)
     _post_process_prototypes(root, filename, clean, reduction, cluster_size)
 
 
@@ -134,7 +136,9 @@ def _post_process_prototypes(
     valid_files = []
     for i, p_file in enumerate(p_files):
         fn = os.path.join(root, p_file)
-        if not os.path.isfile(fn) or 'pkl' not in fn or filename in p_file or not p_file.startswith('0'):
+        if (
+            not os.path.isfile(fn) or 'pkl' not in fn or filename in p_file or not p_file[0].isdigit()
+        ):  #  or not p_file[0].startswith('1'):
             logger.info(f'Skipping {p_file}')
             continue
         pt = _load_pickle(fn)
@@ -148,7 +152,7 @@ def _post_process_prototypes(
 
     if reduction in ['per_class_avg', 'per_class_cluster']:
         average_embeddings = {label: [] for label in prototypes.labels}
-        for embedding, label in zip(prototypes.embeddings, prototypes.labels):
+        for embedding, label in zip(prototypes.normalized_embedding, prototypes.labels):
             embedding = embedding[None] if len(embedding.shape) == 1 else embedding
             average_embeddings[label].append(embedding)
 
@@ -161,7 +165,7 @@ def _post_process_prototypes(
             assert cluster_size > 0
             prototypes = None
             for key, embeddings in average_embeddings.items():
-                embeddings = compress(torch.cat(embeddings, dim=0), cluster_size)
+                embeddings = compress(torch.cat(embeddings, dim=0), cluster_size) if cluster_size > 1 else embeddings
                 pt = ProtoTypes(embeddings, [key] * embeddings.shape[0])
                 prototypes = pt if prototypes is None else prototypes + pt
         prototypes.save(filename)

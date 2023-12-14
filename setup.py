@@ -38,6 +38,6 @@ setup(
         ],
         'dev': [
             'jupyterlab',
-        ]
-    }
+        ],
+    },
 )

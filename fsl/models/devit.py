@@ -127,7 +127,7 @@ class DeVit(nn.Module):
         self, prototypes: ProtoTypes, all_cids: List[str] = None, seen_cids: List[str] = None, is_bg: bool = False
     ) -> None:
         if is_bg:
-            self.register_buffer('bg_tokens', prototypes.embeddings)
+            self.register_buffer('bg_tokens', prototypes.normalized_embedding)
             self.fc_bg_class = nn.Linear(self.t_len, self.temb)
             self.fc_back_class = nn.Linear(len(self.bg_tokens), self.t_bg_emb)
             bg_input_dim = self.temb + self.t_bg_emb

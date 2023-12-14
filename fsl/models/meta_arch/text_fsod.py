@@ -9,6 +9,7 @@ from torchvision.ops import RoIAlign
 
 from fsl.structures import Instances
 from fsl.utils import ProtoTypes
+
 from .fsod import FSOD
 
 _Tensor = Type[torch.Tensor]
