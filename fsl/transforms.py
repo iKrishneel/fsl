@@ -39,10 +39,10 @@ class ResizeLongestSide(object):
         img_hw = image.shape[1:]
 
         target_size = self.get_preprocess_shape(*img_hw, self.size)
-        image = TF.resize(image, target_size)
+        image = TF.resize(image, target_size, antialias=True)
 
         if 'masks' in data:
-            data['masks'] = TF.resize(data['masks'], target_size, interpolation=TF.InterpolationMode.NEAREST)
+            data['masks'] = TF.resize(data['masks'], target_size, interpolation=TF.InterpolationMode.NEAREST, antialias=True)
 
         if bboxes is not None:
             bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=target_size)[0] for bbox in bboxes]
@@ -92,10 +92,10 @@ class Resize(object):
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
         image, bboxes = [data[key] for key in ['image', 'bboxes']]
         img_hw = image.shape[1:]
-        image = TF.resize(image, self.size)
+        image = TF.resize(image, self.size, antialias=True)
 
         if 'masks' in data:
-            data['masks'] = TF.resize(data['masks'], self.size, interpolation=TF.InterpolationMode.NEAREST)
+            data['masks'] = TF.resize(data['masks'], self.size, interpolation=TF.InterpolationMode.NEAREST, antialias=True)
 
         if bboxes is not None:
             bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=image.shape[1:])[0] for bbox in bboxes]
