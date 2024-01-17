@@ -149,6 +149,8 @@ class DeVit(nn.Module):
 
         # sample topk classes
         class_topk = self.num_sample_class if self.num_sample_class > 0 else num_classes
+        class_topk = min(class_topk, num_classes)
+
         sample_class_enabled = class_topk > 0
         num_active_classes, class_indices = num_classes, None
 
@@ -218,6 +220,8 @@ class DeVit(nn.Module):
 
         # sample topk classes
         class_topk = self.num_sample_class if self.num_sample_class > 0 else num_classes
+        class_topk = min(class_topk, num_classes)
+
         sample_class_enabled = class_topk > 0
         num_active_classes, class_indices = num_classes, None
 
@@ -536,18 +540,10 @@ class DeVitSam(DeVit):
         return [self.mask_generator.get_proposals(image) for image in images]
 
 
-# def read_text_file(filename: str) -> List[str]:
-#     with open(filename, 'r') as txt_file:
-#         lines = txt_file.readlines()
-#     return [line.strip('\n') for line in lines]
-
-
 def build_devit(
     prototype_file: str = None,
     background_prototype_file: str = None,
     label_map_file: str = None,
-    all_classes_fn: str = None,
-    seen_classes_fn: str = None,
 ) -> DeVit:
     if label_map_file:
         import json

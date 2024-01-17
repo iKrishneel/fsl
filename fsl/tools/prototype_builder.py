@@ -2,12 +2,13 @@
 
 import os
 import pickle
-from typing import Any, Callable, Dict, Type, List
+from typing import Any, Callable, Dict, List, Type
 
 import torch
-from igniter.logger import logger
 from igniter.engine import EvaluationEngine
+from igniter.logger import logger
 from igniter.registry import engine_registry, event_registry, func_registry, io_registry
+from omegaconf import DictConfig
 from PIL import Image
 
 from fsl.structures import Instances
@@ -17,12 +18,13 @@ _Image = Type[Image.Image]
 
 
 @io_registry('prototype_writer')
-def file_writer(io_cfg: Dict[str, str]) -> Callable:
+def file_writer(io_cfg: Dict[str, str], cfg: DictConfig) -> Callable:
     root = io_cfg.root
     folder_name = io_cfg.folder_name
-    
+    dataset_name = cfg.build[cfg.build.model]['dataset']
+
     def write(prototypes: ProtoTypes, iid: str, model_name: str, prefix: str = '') -> None:
-        write_path = os.path.join(root, model_name, folder_name)
+        write_path = os.path.join(root, model_name, dataset_name, folder_name)
         os.makedirs(write_path, exist_ok=True)
         write_path = os.path.join(write_path, f'{prefix}{str(iid).zfill(12)}.pkl')
         prototypes.save(write_path)
@@ -118,9 +120,9 @@ def compress(tensor, n_clst=5):
 def collate_and_write(
     engine, filename: str, clean: bool = True, reduction: str = 'per_class_avg', cluster_size: int = 10
 ) -> None:
-    root = os.path.join(
-        engine._cfg.io.file_io.root, engine._cfg.build.model, engine._cfg.io.file_io.folder_name
-    )
+    model_name = engine._cfg.build.model
+    dataset_name = engine._cfg.build[model_name]['dataset']
+    root = os.path.join(engine._cfg.io.file_io.root, model_name, dataset_name, engine._cfg.io.file_io.folder_name)
     _post_process_prototypes(root, filename, clean, reduction, cluster_size)
 
 
@@ -138,7 +140,9 @@ def _post_process_prototypes(
     valid_files = []
     for i, p_file in enumerate(p_files):
         fn = os.path.join(root, p_file)
-        if not os.path.isfile(fn) or 'pkl' not in fn or filename in p_file or not p_file[0].isdigit(): #  or not p_file[0].startswith('1'):
+        if (
+            not os.path.isfile(fn) or 'pkl' not in fn or filename in p_file or not p_file[0].isdigit()
+        ):  #  or not p_file[0].startswith('1'):
             logger.info(f'Skipping {p_file}')
             continue
         pt = _load_pickle(fn)
@@ -165,10 +169,7 @@ def _post_process_prototypes(
             assert cluster_size > 0
             prototypes = None
             for key, embeddings in average_embeddings.items():
-                embeddings = (
-                    compress(torch.cat(embeddings, dim=0), cluster_size)
-                    if cluster_size > 1 else embeddings
-                )
+                embeddings = compress(torch.cat(embeddings, dim=0), cluster_size) if cluster_size > 1 else embeddings
                 pt = ProtoTypes(embeddings, [key] * embeddings.shape[0])
                 prototypes = pt if prototypes is None else prototypes + pt
         prototypes.save(filename)
