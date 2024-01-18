@@ -14,9 +14,9 @@ _Tensor = Type[torch.Tensor]
 
 
 class FSOD(nn.Module):
-    def __init__(self, mask_generator, classifier, roi_pooler) -> None:
+    def __init__(self, backbone, classifier, roi_pooler) -> None:
         super(FSOD, self).__init__()
-        self.mask_generator = mask_generator
+        self.backbone = backbone
         self.classifier = classifier
         self.roi_pooler = roi_pooler
 
@@ -39,22 +39,17 @@ class FSOD(nn.Module):
 
         class_labels[class_labels == -1] = self.classifier.train_class_weight.shape[0]
 
-        im_embeddings = self.mask_generator(images)
+        im_embeddings = self.backbone(images)
 
         roi_features = self.forward_features(im_embeddings, gt_bboxes)
         loss_dict = self.classifier(roi_features, class_labels)
         return loss_dict
 
     @torch.no_grad()
-    def inference(self, images: _Tensor, targets: List[Dict[str, Instances]] = None) -> Tuple[Dict[str, Any]]:
-        if targets and 'gt_proposal' in targets[0]:
-            proposals = [target['gt_proposal'] for target in targets]
-            features = self.mask_generator(images)
-        else:
-            proposals = self.mask_generator.get_proposals(images)
-            features = self.mask_generator.features
-
-        bboxes = torch.cat([proposal.to_tensor().bboxes.to(self.device) for proposal in proposals])
+    def inference(self, images: _Tensor, instances: Instances) -> Tuple[Dict[str, Any]]:
+        features = self.backbone(images)
+        instances = instances.convert_bbox_fmt('xyxy').to_tensor(self.device)
+        bboxes = instances.bboxes
         rois = torch.cat([torch.full((len(bboxes), 1), fill_value=0).to(self.device), bboxes], dim=1)
         roi_features = self.forward_features(features, rois.to(features.dtype))
         response = self.classifier(roi_features)
@@ -62,7 +57,7 @@ class FSOD(nn.Module):
 
     @torch.no_grad()
     def build_image_prototypes(self, image: _Tensor, instances: Instances) -> ProtoTypes:
-        features = self.mask_generator(image[None].to(self.device))
+        features = self.backbone(image[None].to(self.device))
         instances = instances.to_tensor(self.device)
 
         roi_feats = self.forward_features(features, [instances.bboxes.to(features.dtype)])
@@ -72,11 +67,41 @@ class FSOD(nn.Module):
 
     @property
     def device(self) -> torch.device:
-        return self.mask_generator.device
+        return self.backbone.device
+
+    def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True, assign:bool = False):
+        from collections import OrderedDict
+
+        new_state_dict = OrderedDict()
+        for key in state_dict:
+            new_key = key if 'mask_generator' not in key else key.replace('mask_generator', 'backbone')
+            new_state_dict[new_key] = state_dict[key]
+
+        return super(FSOD, self).load_state_dict(new_state_dict, strict)
+
+
+class MaskFSOD(FSOD):
+    def __init__(self, mask_generator: Any, **kwargs):
+        self.mask_generator = mask_generator
+        super(MaskFSOD, self).__init__(**kwargs)
+
+    def inference(self, image: _Tensor):
+
+        # TODO
+        raise NotImplementedError('Inference is not fully implemented yet')
+        im_np = image.permute(1, 2, 0).cpu().numpy()
+        im_np = (255 *(im_np - im_np.min()) / (im_np.max() - im_np.max())).astype(np.uint8)
+
+        instances = self.mask_generator.get_proposals(image.permute(1, 2, 0).cpu().numpy())
+        return super(MaskFSOD, self).inference(image, instances)
+
+    def load_state_dict(self, state_dict, strict: bool = False):
+        # TODO: 
+        return super().load_state_dict(state_dict, strict)
 
 
 def _build_fsod(
-    mask_generator: Any,
+    backbone: nn.Module,
     roi_pool_size: int = 16,
     prototype_file: str = None,
     background_prototype_file: str = None,
@@ -84,12 +109,13 @@ def _build_fsod(
 ) -> FSOD:
     from fsl.models.devit import build_devit
 
-    roi_pooler = RoIAlign(roi_pool_size, spatial_scale=1 / mask_generator.downsize, sampling_ratio=-1)
+    roi_pooler = RoIAlign(roi_pool_size, spatial_scale=1 / backbone.downsize, sampling_ratio=-1)
     classifier = build_devit(prototype_file, background_prototype_file, label_map_file)
 
-    return FSOD(mask_generator, classifier, roi_pooler)
+    return FSOD(backbone, classifier, roi_pooler)
 
 
+"""
 @model_registry('sam_fsod')
 def build_sam_fsod(
     sam_args: Dict[str, str],
@@ -101,14 +127,15 @@ def build_sam_fsod(
 ) -> FSOD:
     from fsl.models.sam_utils import build_sam_auto_mask_generator
 
-    mask_generator = build_sam_auto_mask_generator(sam_args, mask_gen_args)
+    backbone = build_sam_auto_mask_generator(sam_args, mask_gen_args)
     return _build_fsod(
-        mask_generator,
+        backbone,
         roi_pool_size,
         prototype_file,
         background_prototype_file,
         label_map_file,
     )
+"""
 
 
 @model_registry('resnet_fsod')

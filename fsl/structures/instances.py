@@ -30,12 +30,15 @@ class Instances(object):
     masks: Array = None
     labels: List[str] = field(default_factory=lambda: [])
     class_ids: List[int] = field(default_factory=lambda: [])
-    bbox_fmt: BoundingBoxFormat = BoundingBoxFormat.XYWH
+    bbox_fmt: Union[BoundingBoxFormat, str] = BoundingBoxFormat.XYWH
     image_id: str = ""
     image_height: int = -1
     image_width: int = -1
 
     def __post_init__(self):
+        if isinstance(self.bbox_fmt, str):
+            self.bbox_fmt = getattr(BoundingBoxFormat, self.bbox_fmt.upper())
+
         size = max(len(self.bboxes), self.masks.shape[0] if self.masks is not None else 0, len(self.class_ids))
         if len(self.bboxes) > 0:
             assert len(self.bboxes) == size, f'Incorect size {len(self.bboxes)} != {size}'
@@ -46,14 +49,19 @@ class Instances(object):
         if self.masks is not None:
             assert self.masks.shape[0] == size, f'Incorect size {len(self.masks)} != {size}'
 
-    def convert_bbox_fmt(self, bbox_fmt: BoundingBoxFormat) -> 'Instances':
+    def convert_bbox_fmt(self, bbox_fmt: Union[BoundingBoxFormat, str]) -> 'Instances':
         assert len(self.bboxes) > 0, 'No bounding box instance'
-        for i, bbox in enumerate(self.bboxes):
+
+        if isinstance(bbox_fmt, str):
+            bbox_fmt = getattr(BoundingBoxFormat, bbox_fmt.upper())
+
+        instances = deepcopy(self)
+        for i, bbox in enumerate(instances.bboxes):
             bbox = torch.as_tensor(bbox) if not isinstance(bbox, torch.Tensor) else bbox
-            bbox = functional.convert_format_bounding_box(bbox, self.bbox_fmt, bbox_fmt)
-            self.bboxes[i] = bbox if isinstance(bbox, torch.Tensor) else bbox.cpu().numpy()
-            self.bbox_fmt = bbox_fmt
-        return self
+            bbox = functional.convert_format_bounding_box(bbox, instances.bbox_fmt, bbox_fmt)
+            instances.bboxes[i] = bbox if isinstance(instances.bboxes[i], torch.Tensor) else bbox.cpu().numpy()
+        instances.bbox_fmt = bbox_fmt
+        return instances
 
     def to_tensor(self, device: str = 'cpu') -> 'Instances':
         instances = deepcopy(self)
