@@ -600,7 +600,7 @@ def devit_sam(
     background_prototype_file: str = None,
     label_map_file: str = None,
 ) -> DeVitSam:
-    from fsl.models.sam_relational import build_sam_auto_mask_generator
+    from fsl.models.sam_utils import build_sam_auto_mask_generator
 
     mask_generator = build_sam_auto_mask_generator(sam_args, mask_gen_args)
     return build_devit_sam(

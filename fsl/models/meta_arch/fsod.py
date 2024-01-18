@@ -99,7 +99,7 @@ def build_sam_fsod(
     background_prototype_file: str = None,
     label_map_file: str = None,
 ) -> FSOD:
-    from fsl.models.sam_relational import build_sam_auto_mask_generator
+    from fsl.models.sam_utils import build_sam_auto_mask_generator
 
     mask_generator = build_sam_auto_mask_generator(sam_args, mask_gen_args)
     return _build_fsod(
