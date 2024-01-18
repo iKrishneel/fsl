@@ -35,7 +35,7 @@ class ResizeLongestSide(object):
     size: int
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        image, bboxes = [data[key] for key in ['image', 'bboxes']]
+        image, bboxes = [data.get(key) for key in ['image', 'bboxes']]
         img_hw = image.shape[1:]
 
         target_size = self.get_preprocess_shape(*img_hw, self.size)
@@ -48,9 +48,9 @@ class ResizeLongestSide(object):
 
         if bboxes is not None:
             bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=target_size)[0] for bbox in bboxes]
+            data['bboxes'] = bboxes
 
         data['image'] = image
-        data['bboxes'] = bboxes
         return data
 
     @staticmethod
@@ -92,7 +92,7 @@ class Resize(object):
     size: Union[List[int], int]
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        image, bboxes = [data[key] for key in ['image', 'bboxes']]
+        image, bboxes = [data.get(key) for key in ['image', 'bboxes']]
         img_hw = image.shape[1:]
         image = TF.resize(image, self.size, antialias=True)
 
@@ -103,9 +103,9 @@ class Resize(object):
 
         if bboxes is not None:
             bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=image.shape[1:])[0] for bbox in bboxes]
+            data['bboxes'] = bboxes
 
         data['image'] = image
-        data['bboxes'] = bboxes
         return data
 
 
@@ -116,7 +116,7 @@ class PadToSize(object):
     bbox_fmt: BoundingBoxFormat = BoundingBoxFormat.XYXY
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        image, bboxes = [data[key] for key in ['image', 'bboxes']]
+        image, bboxes = [data.get(key) for key in ['image', 'bboxes']]
         img_hw = image.shape[1:]
 
         # LRTB --> LTRB
@@ -128,9 +128,9 @@ class PadToSize(object):
 
         if bboxes is not None:
             bboxes = [TF.pad_bounding_box(bbox, self.bbox_fmt, img_hw, padding)[0] for bbox in bboxes]
+            data['bboxes'] = bboxes
 
         data['image'] = image
-        data['bboxes'] = bboxes
         return data
 
 
@@ -142,7 +142,7 @@ class VHFlip(object):
     bbox_fmt: BoundingBoxFormat = BoundingBoxFormat.XYXY
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        image, bboxes = [data[key] for key in ['image', 'bboxes']]
+        image, bboxes = [data.get(key) for key in ['image', 'bboxes']]
         mask = data.get('masks', None)
 
         hflipper = TF.horizontal_flip_image_tensor if isinstance(image, torch.Tensor) else TF.horizontal_flip_image_pil
@@ -164,7 +164,9 @@ class VHFlip(object):
                 bboxes = [TF.vertical_flip_bounding_box(bbox, self.bbox_fmt, spatial_size) for bbox in bboxes]
 
         data['image'] = image
-        data['bboxes'] = bboxes
+
+        if bboxes is not None:
+            data['bboxes'] = bboxes
 
         if mask is not None:
             data['masks'] = mask
@@ -182,16 +184,17 @@ class ConvertFormatBoundingBox(object):
         self.old_fmt, self.new_fmt = [getattr(BoundingBoxFormat, fmt) for fmt in [self.old_fmt, self.new_fmt]]
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        image, bboxes = [data[key] for key in ['image', 'bboxes']]
+        image, bboxes = [data.get(key) for key in ['image', 'bboxes']]
         convert_bounding_box_format = (
             TF.convert_format_bounding_box
             if version.minor_version(torchvision.__version__) < 16
             else TF.convert_bounding_box_format
         )
-        bboxes = [convert_bounding_box_format(bbox, self.old_fmt, self.new_fmt) for bbox in bboxes]
+        if bboxes:
+            bboxes = [convert_bounding_box_format(bbox, self.old_fmt, self.new_fmt) for bbox in bboxes]
+            data['bboxes'] = bboxes
 
         data['image'] = image
-        data['bboxes'] = bboxes
         return data
 
 
@@ -202,12 +205,10 @@ class Normalize(object):
     std: List[float] = field(default_factory=lambda: [0.26862954, 0.26130258, 0.27577711])
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        image, bboxes = [data[key] for key in ['image', 'bboxes']]
+        image = [data.get(key) for key in ['image']][0]
         image = TF.to_image_tensor(image).float() / 255.0
         image = TF.normalize(image, self.mean, self.std)
-
         data['image'] = image
-        data['bboxes'] = bboxes
         return data
 
 
@@ -217,7 +218,7 @@ class ResizeToDivisible(object):
     factor: float
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        image, bboxes = [data[key] for key in ['image', 'bboxes']]
+        image = [data[key] for key in ['image']][0]
         h, w = image.shape[1:]
         h, w = h - h % self.factor, w - w % self.factor
         return Resize([h, w])(data)
