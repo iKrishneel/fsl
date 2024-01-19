@@ -1,21 +1,16 @@
 #!/usr/bin/evn python
 
-import os.path as osp
-from typing import Any, Callable, Dict, Iterator, List, Tuple, Type, Union
+from typing import Any, Dict, List, Type, Union
 
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from fsl.datasets.s3_coco_dataset import S3CocoDatasetSam
-from fsl.structures import Proposal
-from igniter.registry import model_registry
+from fsl.structures import Instances
 from PIL import Image
 from segment_anything import SamAutomaticMaskGenerator as _SAMG
 from segment_anything import SamPredictor as _SamPredictor
 from segment_anything import sam_model_registry
 from torchvision.datapoints import BoundingBoxFormat
-from torchvision.ops import RoIAlign
 
 _Tensor = Type[torch.Tensor]
 _Module = Type[nn.Module]
@@ -90,12 +85,13 @@ class SamAutomaticMaskGenerator(nn.Module, _SAMG):
 
     def get_proposals(self, image: Union[_Image, np.ndarray]) -> List[Dict[str, Any]]:
         image = np.asarray(image)
+        if image.dtype == np.float32:
+            image = (image - image.min()) / (image.max() - image.min())
+            image = (255 * image).astype(np.uint8)
+
         masks = self.generate(image)
-        proposals = [
-            Proposal(*[mask[k] for k in ['bbox', 'segmentation']]).convert_bbox_fmt(BoundingBoxFormat.XYXY)
-            for mask in masks
-        ]
-        return proposals
+        instances = Instances(bboxes=[mask['bbox'] for mask in masks], bbox_fmt='xywh')
+        return instances
 
     @property
     def downsize(self) -> int:

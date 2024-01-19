@@ -81,21 +81,17 @@ class FSOD(nn.Module):
 
 class MaskFSOD(FSOD):
     def __init__(self, mask_generator: Any, **kwargs):
-        self.mask_generator = mask_generator
         super(MaskFSOD, self).__init__(**kwargs)
+        self.mask_generator = mask_generator
 
-    def inference(self, image: _Tensor):
-        # TODO
-        raise NotImplementedError('Inference is not fully implemented yet')
+    @torch.no_grad()
+    def forward(self, image: _Tensor):
         im_np = image.permute(1, 2, 0).cpu().numpy()
-        im_np = (255 * (im_np - im_np.min()) / (im_np.max() - im_np.max())).astype(np.uint8)
-
-        instances = self.mask_generator.get_proposals(image.permute(1, 2, 0).cpu().numpy())
-        return super(MaskFSOD, self).inference(image, instances)
-
-    def load_state_dict(self, state_dict, strict: bool = False):
-        # TODO:
-        return super().load_state_dict(state_dict, strict)
+        instances = self.mask_generator.get_proposals(im_np)
+        image = image[None] if len(image.shape) == 3 else image
+        response = super(MaskFSOD, self).inference(image, instances)
+        response[0].update({'instances': instances})
+        return response
 
 
 def _build_fsod(
@@ -119,7 +115,7 @@ def _build_mask_fsod(
     classifier: nn.Module,
     roi_pooler: RoIAlign,
 ) -> MaskFSOD:
-    return MaskFSOD(mask_generator, backbone, classifier, roi_pooler)
+    return MaskFSOD(mask_generator, backbone=backbone, classifier=classifier, roi_pooler=roi_pooler)
 
 
 """
@@ -305,7 +301,7 @@ def devit_dinov2_fsod(
     prototype_file: str = None,
     background_prototype_file: str = None,
     label_map_file: str = None,
-    mask_gen_args: Dict[str:Any] = None,
+    rpn_args: Dict[str, Any] = None,
 ) -> FSOD:
     backbone = torch.hub.load('facebookresearch/dinov2', model_name)
 
@@ -344,10 +340,10 @@ def devit_dinov2_fsod(
         label_map_file,
     )
 
-    if mask_gen_args is not None:
+    if rpn_args is not None:
         from fsl.models.sam_utils import build_sam_auto_mask_generator
 
-        mask_generator = build_sam_auto_mask_generator(**mask_gen_args)
+        mask_generator = build_sam_auto_mask_generator(**rpn_args)
 
         model = _build_mask_fsod(
             mask_generator,
