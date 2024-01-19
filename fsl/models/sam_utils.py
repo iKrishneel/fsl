@@ -7,6 +7,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from fsl.datasets.s3_coco_dataset import S3CocoDatasetSam
+from fsl.structures import Proposal
 from igniter.registry import model_registry
 from PIL import Image
 from segment_anything import SamAutomaticMaskGenerator as _SAMG
@@ -14,9 +16,6 @@ from segment_anything import SamPredictor as _SamPredictor
 from segment_anything import sam_model_registry
 from torchvision.datapoints import BoundingBoxFormat
 from torchvision.ops import RoIAlign
-
-from fsl.datasets.s3_coco_dataset import S3CocoDatasetSam
-from fsl.structures import Proposal
 
 _Tensor = Type[torch.Tensor]
 _Module = Type[nn.Module]

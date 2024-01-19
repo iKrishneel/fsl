@@ -2,15 +2,15 @@
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 
-import clip
 import cv2 as cv
 import numpy as np
 import torch
 import torch.nn as nn
+from fsl.models.sam_utils import SamAutomaticMaskGenerator
 from PIL import Image
 from torchvision.transforms import Compose
 
-from fsl.models.sam_utils import SamAutomaticMaskGenerator
+import clip
 
 _Tensor = Type[torch.Tensor]
 _Image = Type[Image.Image]

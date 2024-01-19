@@ -4,11 +4,10 @@ from typing import Any, Dict, List, Tuple, Type, Union
 
 import torch
 import torch.nn as nn
-from igniter.registry import model_registry
-from torchvision.ops import RoIAlign
-
 from fsl.structures import Instances
 from fsl.utils.prototypes import ProtoTypes
+from igniter.registry import model_registry
+from torchvision.ops import RoIAlign
 
 _Tensor = Type[torch.Tensor]
 
@@ -69,7 +68,7 @@ class FSOD(nn.Module):
     def device(self) -> torch.device:
         return self.backbone.device
 
-    def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True, assign:bool = False):
+    def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True, assign: bool = False):
         from collections import OrderedDict
 
         new_state_dict = OrderedDict()
@@ -86,17 +85,16 @@ class MaskFSOD(FSOD):
         super(MaskFSOD, self).__init__(**kwargs)
 
     def inference(self, image: _Tensor):
-
         # TODO
         raise NotImplementedError('Inference is not fully implemented yet')
         im_np = image.permute(1, 2, 0).cpu().numpy()
-        im_np = (255 *(im_np - im_np.min()) / (im_np.max() - im_np.max())).astype(np.uint8)
+        im_np = (255 * (im_np - im_np.min()) / (im_np.max() - im_np.max())).astype(np.uint8)
 
         instances = self.mask_generator.get_proposals(image.permute(1, 2, 0).cpu().numpy())
         return super(MaskFSOD, self).inference(image, instances)
 
     def load_state_dict(self, state_dict, strict: bool = False):
-        # TODO: 
+        # TODO:
         return super().load_state_dict(state_dict, strict)
 
 
@@ -113,6 +111,15 @@ def _build_fsod(
     classifier = build_devit(prototype_file, background_prototype_file, label_map_file)
 
     return FSOD(backbone, classifier, roi_pooler)
+
+
+def _build_mask_fsod(
+    mask_generator: nn.Module,
+    backbone: nn.Module,
+    classifier: nn.Module,
+    roi_pooler: RoIAlign,
+) -> MaskFSOD:
+    return MaskFSOD(mask_generator, backbone, classifier, roi_pooler)
 
 
 """
@@ -298,6 +305,7 @@ def devit_dinov2_fsod(
     prototype_file: str = None,
     background_prototype_file: str = None,
     label_map_file: str = None,
+    mask_gen_args: Dict[str:Any] = None,
 ) -> FSOD:
     backbone = torch.hub.load('facebookresearch/dinov2', model_name)
 
@@ -328,10 +336,24 @@ def devit_dinov2_fsod(
     for param in backbone.parameters():
         param.requires_grad = False
 
-    return _build_fsod(
+    model = _build_fsod(
         DinoV2Patch(backbone.to(torch.float16)),
         roi_pool_size,
         prototype_file,
         background_prototype_file,
         label_map_file,
     )
+
+    if mask_gen_args is not None:
+        from fsl.models.sam_utils import build_sam_auto_mask_generator
+
+        mask_generator = build_sam_auto_mask_generator(**mask_gen_args)
+
+        model = _build_mask_fsod(
+            mask_generator,
+            model.backbone,
+            model.classifier,
+            model.roi_pooler,
+        )
+
+    return model

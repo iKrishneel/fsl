@@ -5,15 +5,14 @@ from typing import Any, Dict, List, Tuple, Type, Union
 import numpy as np
 import torch
 import torch.nn as nn
-from igniter.registry import model_registry
-from PIL import Image
-from torchvision.ops import RoIAlign
-from torchvision.ops.boxes import box_iou
-
 from fsl.datasets import utils
 from fsl.structures import Instances
 from fsl.utils.matcher import Matcher
 from fsl.utils.prototypes import ProtoTypes
+from igniter.registry import model_registry
+from PIL import Image
+from torchvision.ops import RoIAlign
+from torchvision.ops.boxes import box_iou
 
 _Image = Type[Image.Image]
 _Tensor = Type[torch.Tensor]
