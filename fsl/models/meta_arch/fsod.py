@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import importlib
 from typing import Any, Dict, List, Tuple, Type, Union
 
 import torch
@@ -341,10 +342,16 @@ def devit_dinov2_fsod(
     )
 
     if rpn_args is not None:
-        from fsl.models.sam_utils import build_sam_auto_mask_generator
+        rpn_type = rpn_args.pop('type', 'sam').lower()
 
-        mask_generator = build_sam_auto_mask_generator(**rpn_args)
+        if rpn_type == 'sam':
+            build_func = importlib.import_module('fsl.models.sam_utils').build_sam_auto_mask_generator
+        elif rpn_type == 'fast_sam':
+            build_func = importlib.import_module('fsl.models.fast_sam_utils').build_fast_sam_mask_generator
+        else:
+            raise TypeError(f'Unknown type {rpn_type}')
 
+        mask_generator = build_func(**rpn_args)
         model = _build_mask_fsod(
             mask_generator,
             model.backbone,

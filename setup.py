@@ -31,7 +31,7 @@ setup(
     install_requires=install_requires,
     test_suite='tests',
     extras_require={
-        'clip': [
+        'full': [
             'clip @ git+https://github.com/openai/CLIP.git',
             'timm',
             'segment-anything',

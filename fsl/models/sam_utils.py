@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Type, Union
 import numpy as np
 import torch
 import torch.nn as nn
+from fsl.models import utils
 from fsl.structures import Instances
 from PIL import Image
 from segment_anything import SamAutomaticMaskGenerator as _SAMG
@@ -113,15 +114,8 @@ def get_sam_model(name: str = 'default'):
     checkpoint = os.path.join(directory, f'sam_vit_{sam_checkpoint_registry[name]}.pth')
 
     if not os.path.isfile(checkpoint):
-        os.makedirs(directory, exist_ok=True)
-        try:
-            checkpoint_url = url % sam_checkpoint_registry[name]
-            command = ['wget', checkpoint_url, '-P', directory, '--quiet', '--show-progress', '--progress=dot']
-            subprocess.run(command, check=True)
-            print(f'Downloaded {checkpoint_url}')
-        except subprocess.CalledProcessError as e:
-            print(f'Error downloading {checkpoint_url}: {e}')
-            checkpoint = None
+        checkpoint_url = url % sam_checkpoint_registry[name]
+        utils.download(checkpoint_url, directory)
 
     print(f'Loading checkpoint from {checkpoint}')
     sam_model = sam_model_registry[name](checkpoint)
