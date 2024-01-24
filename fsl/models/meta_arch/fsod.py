@@ -5,10 +5,11 @@ from typing import Any, Dict, List, Tuple, Type, Union
 
 import torch
 import torch.nn as nn
-from fsl.structures import Instances
-from fsl.utils.prototypes import ProtoTypes
 from igniter.registry import model_registry
 from torchvision.ops import RoIAlign
+
+from fsl.structures import Instances
+from fsl.utils.prototypes import ProtoTypes
 
 _Tensor = Type[torch.Tensor]
 
@@ -74,7 +75,11 @@ class FSOD(nn.Module):
 
         new_state_dict = OrderedDict()
         for key in state_dict:
-            new_key = key if 'mask_generator' not in key else key.replace('mask_generator', 'backbone')
+            new_key = (
+                key
+                if 'mask_generator.backbone' not in key
+                else key.replace('mask_generator.backbone', 'backbone.backbone')
+            )
             new_state_dict[new_key] = state_dict[key]
 
         return super(FSOD, self).load_state_dict(new_state_dict, strict)
@@ -86,13 +91,20 @@ class MaskFSOD(FSOD):
         self.mask_generator = mask_generator
 
     @torch.no_grad()
-    def forward(self, image: _Tensor):
+    def forward(self, image: _Tensor) -> Instances:
         im_np = image.permute(1, 2, 0).cpu().numpy()
         instances = self.mask_generator.get_proposals(im_np)
         image = image[None] if len(image.shape) == 3 else image
         response = super(MaskFSOD, self).inference(image, instances)
-        response[0].update({'instances': instances})
-        return response
+        # response[0].update({'instances': instances})
+        instances.scores = response[0]['scores']
+        return instances
+
+    def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True):
+        for key in self.mask_generator.state_dict():
+            state_dict[f'mask_generator.{key}'] = self.mask_generator.state_dict()[key]
+
+        return super().load_state_dict(state_dict, strict)
 
 
 def _build_fsod(

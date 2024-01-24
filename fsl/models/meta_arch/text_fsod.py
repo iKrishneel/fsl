@@ -4,10 +4,11 @@ from typing import Any, Dict, List, Type, Union
 
 import torch
 import torch.nn as nn
-from fsl.structures import Instances
-from fsl.utils import ProtoTypes
 from igniter.registry import model_registry
 from torchvision.ops import RoIAlign
+
+from fsl.structures import Instances
+from fsl.utils import ProtoTypes
 
 from .fsod import FSOD
 

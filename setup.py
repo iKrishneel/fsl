@@ -35,6 +35,7 @@ setup(
             'clip @ git+https://github.com/openai/CLIP.git',
             'timm',
             'segment-anything',
+            'ultralytics',
         ],
         'dev': [
             'jupyterlab',

@@ -2,8 +2,9 @@
 
 import numpy as np
 import torch
-from fsl.structures import Instances
 from ultralytics.models.fastsam import FastSAM
+
+from fsl.structures import Instances
 
 
 class FastSAMMaskGenerator(torch.nn.Module):
