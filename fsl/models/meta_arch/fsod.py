@@ -92,7 +92,9 @@ class MaskFSOD(FSOD):
 
     @torch.no_grad()
     def forward(self, image: _Tensor) -> Instances:
+        image = image.to(self.dtype)
         im_np = image.permute(1, 2, 0).cpu().numpy()
+
         instances = self.mask_generator.get_proposals(im_np)
         image = image[None] if len(image.shape) == 3 else image
         response = super(MaskFSOD, self).inference(image, instances)
@@ -105,6 +107,19 @@ class MaskFSOD(FSOD):
             state_dict[f'mask_generator.{key}'] = self.mask_generator.state_dict()[key]
 
         return super().load_state_dict(state_dict, strict)
+
+    def to(self, *args, **kwargs):
+        ret = super().to(*args, **kwargs)
+
+        # currently fast sam only supports float32
+        if torch.float16 in args:
+            ret.mask_generator.to(torch.float32)
+
+        return ret
+
+    @property
+    def dtype(self) -> torch.dtype:
+        return self.classifier.fc_other_class.weight.dtype
 
 
 def _build_fsod(
@@ -354,6 +369,7 @@ def devit_dinov2_fsod(
     )
 
     if rpn_args is not None:
+        rpn_args = dict(rpn_args)
         rpn_type = rpn_args.pop('type', 'sam').lower()
 
         if rpn_type == 'sam':

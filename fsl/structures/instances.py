@@ -78,6 +78,8 @@ class Instances(object):
             instances.masks = torch.as_tensor(instances.masks).to(device)
         if len(instances.class_ids) > 0:
             instances.class_ids = torch.as_tensor(instances.class_ids).to(device)
+        if len(instances.scores) > 0:
+            instances.scores = torch.as_tensor(instances.scores).to(device)
         return instances
 
     def repeat(self, n: int) -> List['Instances']:

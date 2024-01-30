@@ -19,7 +19,7 @@ class FastSAMMaskGenerator(torch.nn.Module):
 
     def get_proposals(self, image: np.ndarray) -> Instances:
         im_shape = image.shape[:2]
-        if image.dtype == np.float32:
+        if image.dtype != np.uint8:
             image = (image - image.min()) / (image.max() - image.min())
             image = (255 * image).astype(np.uint8)
 

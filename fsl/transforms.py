@@ -190,7 +190,7 @@ class ConvertFormatBoundingBox(object):
             if version.minor_version(torchvision.__version__) < 16
             else TF.convert_bounding_box_format
         )
-        if bboxes:
+        if bboxes is not None:
             bboxes = [convert_bounding_box_format(bbox, self.old_fmt, self.new_fmt) for bbox in bboxes]
             data['bboxes'] = bboxes
 
@@ -222,6 +222,40 @@ class ResizeToDivisible(object):
         h, w = image.shape[1:]
         h, w = h - h % self.factor, w - w % self.factor
         return Resize([h, w])(data)
+
+
+@transform_registry
+class RandomResizeCrop(transforms.RandomResizedCrop):
+    def __init__(self, *args, **kwargs):
+        self.min_size = kwargs.pop('min_size', 10)
+        super(RandomResizeCrop, self).__init__(*args, **kwargs)
+
+    def forward(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        if not np.random.choice([True, False]):
+            return Resize(self.size)(data)
+
+        image = data['image']
+
+        i, j, h, w = self.get_params(image, self.scale, self.ratio)
+        data['image'] = TF.resized_crop(image, i, j, h, w, self.size, self.interpolation, antialias=self.antialias)
+
+        if 'masks' in data:
+            data['masks'] = TF.resized_crop(
+                data['masks'], i, j, h, w, self.size, transforms.InterpolationMode.NEAREST, antialias=self.antialias
+            )
+
+        if 'bboxes' in data:
+            bboxes = data['bboxes']
+            bboxes = torch.stack(bboxes) if isinstance(bboxes, list) else bboxes
+            nbboxes, _ = TF.resized_crop_bounding_box(bboxes, BoundingBoxFormat.XYXY, i, j, h, w, self.size)
+
+            diff = nbboxes[:, 2:] - nbboxes[:, :2]
+            flags = torch.prod(diff > self.min_size, dim=1).bool()
+            data['bboxes'] = nbboxes[flags]
+            data['category_ids'] = data['category_ids'][flags]
+            data['category_names'] = [name for i, name in enumerate(data['category_names']) if flags[i]]
+
+        return data
 
 
 @transform_registry
