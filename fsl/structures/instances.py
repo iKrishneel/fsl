@@ -40,7 +40,7 @@ class Instances(object):
         if isinstance(self.bbox_fmt, str):
             self.bbox_fmt = getattr(BoundingBoxFormat, self.bbox_fmt.upper())
 
-        size = max(len(self.bboxes), self.masks.shape[0] if self.masks is not None else 0, len(self.class_ids))
+        size = max(len(self.bboxes), len(self.masks) if self.masks is not None else 0, len(self.class_ids))
         if len(self.bboxes) > 0:
             assert len(self.bboxes) == size, f'Incorect size {len(self.bboxes)} != {size}'
         if len(self.class_ids) > 0:
@@ -48,13 +48,14 @@ class Instances(object):
         if self.labels:
             assert len(self.labels) == size, f'Incorect size {len(self.labels)} != {size}'
         if self.masks is not None:
-            assert self.masks.shape[0] == size, f'Incorect size {len(self.masks)} != {size}'
+            assert len(self.masks) == size, f'Incorect size {len(self.masks)} != {size}'
 
             self.image_width, self.image_height = (
                 (self.masks.shape[1:][::-1])
                 if any(dim == -1 for dim in (self.image_width, self.image_height))
                 else (self.image_width, self.image_height)
             )
+        self._size = size
 
     def convert_bbox_fmt(self, bbox_fmt: Union[BoundingBoxFormat, str]) -> 'Instances':
         assert len(self.bboxes) > 0, 'No bounding box instance'
@@ -105,3 +106,6 @@ class Instances(object):
 
         instance.image_height, instance.image_width = new_hw
         return instance
+
+    def __len__(self) -> int:
+        return self._size

@@ -85,14 +85,19 @@ class SamAutomaticMaskGenerator(nn.Module, _SAMG):
             images = [np.asarray(image) for image in images]
         return self.predictor.set_images(images)
 
-    def get_proposals(self, image: Union[_Image, np.ndarray]) -> List[Dict[str, Any]]:
+    def get_proposals(self, image: Union[_Image, np.ndarray]) -> List[Instances]:
         image = np.asarray(image)
         if image.dtype == np.float32:
             image = (image - image.min()) / (image.max() - image.min())
             image = (255 * image).astype(np.uint8)
 
         masks = self.generate(image)
-        instances = Instances(*image.shape[:2], bboxes=[mask['bbox'] for mask in masks], bbox_fmt='xywh')
+        instances = Instances(
+            *image.shape[:2],
+            bboxes=[mask['bbox'] for mask in masks],
+            masks=np.array([mask['segmentation'] for mask in masks]),
+            bbox_fmt='xywh',
+        )
         return instances
 
     @property
@@ -129,6 +134,9 @@ def build_sam_predictor(model: str, checkpoint: str = None) -> SamPredictor:
     )
 
 
-def build_sam_auto_mask_generator(sam_args: Dict[str, str], mask_gen_args: Dict[str, Any]) -> SamAutomaticMaskGenerator:
+def build_sam_auto_mask_generator(
+    sam_args: Dict[str, str], mask_gen_args: Dict[str, Any] = {}
+) -> SamAutomaticMaskGenerator:
     sam_predictor = build_sam_predictor(**sam_args)
+    mask_gen_args = mask_gen_args or {}
     return SamAutomaticMaskGenerator(sam_predictor.model, **mask_gen_args)
