@@ -295,10 +295,11 @@ class ArgumentNoisyBBoxes(object):
             assert torch.all(matched_labels == 0)
             class_labels = torch.zeros_like(matched_idxs)
 
-        class_labels[matched_labels == -1] = -100
+        temp_label = -100
+        class_labels[matched_labels == -1] = temp_label
         class_labels[matched_labels == 0] = self.background_id
 
-        positive = ((class_labels != -100) & (class_labels != self.background_id)).nonzero().flatten()
+        positive = ((class_labels != temp_label) & (class_labels != self.background_id)).nonzero().flatten()
         negative = (class_labels == self.background_id).nonzero().flatten()
 
         num_pos = int(self.batch_size_per_image * self.pos_ratio)
