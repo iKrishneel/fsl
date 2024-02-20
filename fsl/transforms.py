@@ -35,20 +35,22 @@ class ResizeLongestSide(object):
     size: int
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        image, bboxes = [data[key] for key in ['image', 'bboxes']]
+        image, bboxes = [data.get(key) for key in ['image', 'bboxes']]
         img_hw = image.shape[1:]
 
         target_size = self.get_preprocess_shape(*img_hw, self.size)
         image = TF.resize(image, target_size, antialias=True)
 
         if 'masks' in data:
-            data['masks'] = TF.resize(data['masks'], target_size, interpolation=TF.InterpolationMode.NEAREST, antialias=True)
+            data['masks'] = TF.resize(
+                data['masks'], target_size, interpolation=TF.InterpolationMode.NEAREST, antialias=True
+            )
 
         if bboxes is not None:
             bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=target_size)[0] for bbox in bboxes]
+            data['bboxes'] = bboxes
 
         data['image'] = image
-        data['bboxes'] = bboxes
         return data
 
     @staticmethod
@@ -90,18 +92,20 @@ class Resize(object):
     size: Union[List[int], int]
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        image, bboxes = [data[key] for key in ['image', 'bboxes']]
+        image, bboxes = [data.get(key) for key in ['image', 'bboxes']]
         img_hw = image.shape[1:]
         image = TF.resize(image, self.size, antialias=True)
 
         if 'masks' in data:
-            data['masks'] = TF.resize(data['masks'], self.size, interpolation=TF.InterpolationMode.NEAREST, antialias=True)
+            data['masks'] = TF.resize(
+                data['masks'], self.size, interpolation=TF.InterpolationMode.NEAREST, antialias=True
+            )
 
         if bboxes is not None:
             bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=image.shape[1:])[0] for bbox in bboxes]
+            data['bboxes'] = bboxes
 
         data['image'] = image
-        data['bboxes'] = bboxes
         return data
 
 
@@ -112,7 +116,7 @@ class PadToSize(object):
     bbox_fmt: BoundingBoxFormat = BoundingBoxFormat.XYXY
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        image, bboxes = [data[key] for key in ['image', 'bboxes']]
+        image, bboxes = [data.get(key) for key in ['image', 'bboxes']]
         img_hw = image.shape[1:]
 
         # LRTB --> LTRB
@@ -124,9 +128,9 @@ class PadToSize(object):
 
         if bboxes is not None:
             bboxes = [TF.pad_bounding_box(bbox, self.bbox_fmt, img_hw, padding)[0] for bbox in bboxes]
+            data['bboxes'] = bboxes
 
         data['image'] = image
-        data['bboxes'] = bboxes
         return data
 
 
@@ -138,7 +142,7 @@ class VHFlip(object):
     bbox_fmt: BoundingBoxFormat = BoundingBoxFormat.XYXY
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        image, bboxes = [data[key] for key in ['image', 'bboxes']]
+        image, bboxes = [data.get(key) for key in ['image', 'bboxes']]
         mask = data.get('masks', None)
 
         hflipper = TF.horizontal_flip_image_tensor if isinstance(image, torch.Tensor) else TF.horizontal_flip_image_pil
@@ -160,7 +164,9 @@ class VHFlip(object):
                 bboxes = [TF.vertical_flip_bounding_box(bbox, self.bbox_fmt, spatial_size) for bbox in bboxes]
 
         data['image'] = image
-        data['bboxes'] = bboxes
+
+        if bboxes is not None:
+            data['bboxes'] = bboxes
 
         if mask is not None:
             data['masks'] = mask
@@ -178,16 +184,17 @@ class ConvertFormatBoundingBox(object):
         self.old_fmt, self.new_fmt = [getattr(BoundingBoxFormat, fmt) for fmt in [self.old_fmt, self.new_fmt]]
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        image, bboxes = [data[key] for key in ['image', 'bboxes']]
+        image, bboxes = [data.get(key) for key in ['image', 'bboxes']]
         convert_bounding_box_format = (
             TF.convert_format_bounding_box
             if version.minor_version(torchvision.__version__) < 16
             else TF.convert_bounding_box_format
         )
-        bboxes = [convert_bounding_box_format(bbox, self.old_fmt, self.new_fmt) for bbox in bboxes]
+        if bboxes is not None:
+            bboxes = [convert_bounding_box_format(bbox, self.old_fmt, self.new_fmt) for bbox in bboxes]
+            data['bboxes'] = bboxes
 
         data['image'] = image
-        data['bboxes'] = bboxes
         return data
 
 
@@ -198,12 +205,10 @@ class Normalize(object):
     std: List[float] = field(default_factory=lambda: [0.26862954, 0.26130258, 0.27577711])
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        image, bboxes = [data[key] for key in ['image', 'bboxes']]
+        image = [data.get(key) for key in ['image']][0]
         image = TF.to_image_tensor(image).float() / 255.0
         image = TF.normalize(image, self.mean, self.std)
-
         data['image'] = image
-        data['bboxes'] = bboxes
         return data
 
 
@@ -213,10 +218,44 @@ class ResizeToDivisible(object):
     factor: float
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        image, bboxes = [data[key] for key in ['image', 'bboxes']]
+        image = [data[key] for key in ['image']][0]
         h, w = image.shape[1:]
         h, w = h - h % self.factor, w - w % self.factor
         return Resize([h, w])(data)
+
+
+@transform_registry
+class RandomResizeCrop(transforms.RandomResizedCrop):
+    def __init__(self, *args, **kwargs):
+        self.min_size = kwargs.pop('min_size', 10)
+        super(RandomResizeCrop, self).__init__(*args, **kwargs)
+
+    def forward(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        if not np.random.choice([True, False]):
+            return Resize(self.size)(data)
+
+        image = data['image']
+
+        i, j, h, w = self.get_params(image, self.scale, self.ratio)
+        data['image'] = TF.resized_crop(image, i, j, h, w, self.size, self.interpolation, antialias=self.antialias)
+
+        if 'masks' in data:
+            data['masks'] = TF.resized_crop(
+                data['masks'], i, j, h, w, self.size, transforms.InterpolationMode.NEAREST, antialias=self.antialias
+            )
+
+        if 'bboxes' in data:
+            bboxes = data['bboxes']
+            bboxes = torch.stack(bboxes) if isinstance(bboxes, list) else bboxes
+            nbboxes, _ = TF.resized_crop_bounding_box(bboxes, BoundingBoxFormat.XYXY, i, j, h, w, self.size)
+
+            diff = nbboxes[:, 2:] - nbboxes[:, :2]
+            flags = torch.prod(diff > self.min_size, dim=1).bool()
+            data['bboxes'] = nbboxes[flags]
+            data['category_ids'] = data['category_ids'][flags]
+            data['category_names'] = [name for i, name in enumerate(data['category_names']) if flags[i]]
+
+        return data
 
 
 @transform_registry
@@ -226,7 +265,7 @@ class ArgumentNoisyBBoxes(object):
     pos_ratio: float = 0.25
     proposal_thresh: List[float] = field(default_factory=lambda: [0.3, 0.7])
     labels: List[int] = field(default_factory=lambda: [0, -1, 1])
-    background_id: int = 0
+    background_id: int = -1
     batch_size_per_image: int = 128
 
     def __post_init__(self):
@@ -242,7 +281,9 @@ class ArgumentNoisyBBoxes(object):
 
         gt_bboxes = [gt_bbox.reshape(-1, 4) for gt_bbox in gt_bboxes]
         img_hw = image.shape[1:]
-        noisy_bboxes = prepare_noisy_boxes(gt_bboxes, img_hw, n=self.sample_size)
+        noisy_bboxes = prepare_noisy_boxes(
+            gt_bboxes, img_hw, n=self.sample_size, random_center=np.random.choice([True, False])
+        )
         bboxes = torch.cat([torch.cat([gt_bboxes[i], noisy_bboxes[i]]) for i in range(len(gt_bboxes))])
 
         match_quality_matrix = box_iou(torch.cat(gt_bboxes), bboxes)
@@ -254,10 +295,11 @@ class ArgumentNoisyBBoxes(object):
             assert torch.all(matched_labels == 0)
             class_labels = torch.zeros_like(matched_idxs)
 
+        temp_label = -100
+        class_labels[matched_labels == -1] = temp_label
         class_labels[matched_labels == 0] = self.background_id
-        class_labels[matched_labels == -1] = -1
 
-        positive = ((class_labels != -1) & (class_labels != self.background_id)).nonzero().flatten()
+        positive = ((class_labels != temp_label) & (class_labels != self.background_id)).nonzero().flatten()
         negative = (class_labels == self.background_id).nonzero().flatten()
 
         num_pos = int(self.batch_size_per_image * self.pos_ratio)
@@ -273,7 +315,7 @@ class ArgumentNoisyBBoxes(object):
         neg_idx = negative[perm2]
         sampled_idxs = torch.cat([pos_idx, neg_idx], dim=0)
 
-        bboxes = bboxes[sampled_idxs]
+        # bboxes =
         class_labels = class_labels[sampled_idxs]
 
         mapping = {int(class_ids[i]): names[i] for i in range(len(class_ids))}
@@ -281,7 +323,7 @@ class ArgumentNoisyBBoxes(object):
         names = [mapping[int(i)] for i in class_labels]
 
         data['image'] = image
-        data['bboxes'] = bboxes
-        data['category_ids'] = class_labels
+        data['bboxes'] = bboxes[sampled_idxs]
+        data['category_ids'] = torch.Tensor(class_labels)
         data['category_names'] = names
         return data

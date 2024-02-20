@@ -1,22 +1,18 @@
 #!/usr/bin/evn python
 
-import os.path as osp
-from typing import Any, Callable, Dict, Iterator, List, Tuple, Type, Union
+from typing import Any, Dict, List, Type, Union
 
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from igniter.registry import model_registry
 from PIL import Image
 from segment_anything import SamAutomaticMaskGenerator as _SAMG
 from segment_anything import SamPredictor as _SamPredictor
 from segment_anything import sam_model_registry
 from torchvision.datapoints import BoundingBoxFormat
-from torchvision.ops import RoIAlign
 
-from fsl.datasets.s3_coco_dataset import S3CocoDatasetSam
-from fsl.structures import Proposal
+from fsl.models import utils
+from fsl.structures import Instances
 
 _Tensor = Type[torch.Tensor]
 _Module = Type[nn.Module]
@@ -89,14 +85,20 @@ class SamAutomaticMaskGenerator(nn.Module, _SAMG):
             images = [np.asarray(image) for image in images]
         return self.predictor.set_images(images)
 
-    def get_proposals(self, image: Union[_Image, np.ndarray]) -> List[Dict[str, Any]]:
+    def get_proposals(self, image: Union[_Image, np.ndarray]) -> List[Instances]:
         image = np.asarray(image)
+        if image.dtype == np.float32:
+            image = (image - image.min()) / (image.max() - image.min())
+            image = (255 * image).astype(np.uint8)
+
         masks = self.generate(image)
-        proposals = [
-            Proposal(*[mask[k] for k in ['bbox', 'segmentation']]).convert_bbox_fmt(BoundingBoxFormat.XYXY)
-            for mask in masks
-        ]
-        return proposals
+        instances = Instances(
+            *image.shape[:2],
+            bboxes=[mask['bbox'] for mask in masks],
+            masks=np.array([mask['segmentation'] for mask in masks]),
+            bbox_fmt='xywh',
+        )
+        return instances
 
     @property
     def downsize(self) -> int:
@@ -118,15 +120,8 @@ def get_sam_model(name: str = 'default'):
     checkpoint = os.path.join(directory, f'sam_vit_{sam_checkpoint_registry[name]}.pth')
 
     if not os.path.isfile(checkpoint):
-        os.makedirs(directory, exist_ok=True)
-        try:
-            checkpoint_url = url % sam_checkpoint_registry[name]
-            command = ['wget', checkpoint_url, '-P', directory, '--quiet', '--show-progress', '--progress=dot']
-            subprocess.run(command, check=True)
-            print(f'Downloaded {checkpoint_url}')
-        except subprocess.CalledProcessError as e:
-            print(f'Error downloading {checkpoint_url}: {e}')
-            checkpoint = None
+        checkpoint_url = url % sam_checkpoint_registry[name]
+        utils.download(checkpoint_url, directory)
 
     print(f'Loading checkpoint from {checkpoint}')
     sam_model = sam_model_registry[name](checkpoint)
@@ -139,6 +134,9 @@ def build_sam_predictor(model: str, checkpoint: str = None) -> SamPredictor:
     )
 
 
-def build_sam_auto_mask_generator(sam_args: Dict[str, str], mask_gen_args: Dict[str, Any]) -> SamAutomaticMaskGenerator:
+def build_sam_auto_mask_generator(
+    sam_args: Dict[str, str], mask_gen_args: Dict[str, Any] = {}
+) -> SamAutomaticMaskGenerator:
     sam_predictor = build_sam_predictor(**sam_args)
+    mask_gen_args = mask_gen_args or {}
     return SamAutomaticMaskGenerator(sam_predictor.model, **mask_gen_args)

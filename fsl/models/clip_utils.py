@@ -10,7 +10,7 @@ import torch.nn as nn
 from PIL import Image
 from torchvision.transforms import Compose
 
-from fsl.models.sam_relational import SamAutomaticMaskGenerator
+from fsl.models.sam_utils import SamAutomaticMaskGenerator
 
 _Tensor = Type[torch.Tensor]
 _Image = Type[Image.Image]

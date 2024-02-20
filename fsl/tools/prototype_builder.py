@@ -8,6 +8,7 @@ import torch
 from igniter.engine import EvaluationEngine
 from igniter.logger import logger
 from igniter.registry import engine_registry, event_registry, func_registry, io_registry
+from omegaconf import DictConfig
 from PIL import Image
 
 from fsl.structures import Instances
@@ -17,12 +18,13 @@ _Image = Type[Image.Image]
 
 
 @io_registry('prototype_writer')
-def file_writer(io_cfg: Dict[str, str]) -> Callable:
+def file_writer(io_cfg: Dict[str, str], cfg: DictConfig) -> Callable:
     root = io_cfg.root
     folder_name = io_cfg.folder_name
+    dataset_name = cfg.build[cfg.build.model]['dataset']
 
     def write(prototypes: ProtoTypes, iid: str, model_name: str, prefix: str = '') -> None:
-        write_path = os.path.join(root, model_name, folder_name)
+        write_path = os.path.join(root, model_name, dataset_name, folder_name)
         os.makedirs(write_path, exist_ok=True)
         write_path = os.path.join(write_path, f'{prefix}{str(iid).zfill(12)}.pkl')
         prototypes.save(write_path)
@@ -35,6 +37,8 @@ def prototype_forward(engine, batch) -> None:
     for image, instances in zip(*batch):
         image_ids = instances['image_ids']
         instances = Instances(
+            image_height=image.shape[-2],
+            image_width=image.shape[-1],
             bboxes=instances['bboxes'],
             class_ids=instances['category_ids'],
             labels=instances['category_names'],
@@ -50,7 +54,7 @@ def prototype_forward(engine, batch) -> None:
                 mask[i, y1:y2, x1:x2] = 1
             return mask.to(torch.uint8)
 
-        features = engine._model.mask_generator(image[None])
+        features = engine._model.backbone(image[None])
         masks = bboxes2mask(instances.bboxes, image.shape[1:])
         masks = torch.nn.functional.interpolate(masks[None], features.shape[2:], mode='nearest')[0]
         masks = masks.to(torch.bool).to(features.device)
@@ -62,8 +66,6 @@ def prototype_forward(engine, batch) -> None:
             return
 
         tokens = torch.stack([(features * mask).flatten(1).sum(1) / mask.sum() for mask in masks if mask.sum() > 0])
-        if len(tokens.shape) != 2:
-            breakpoint()
 
         prototypes = ProtoTypes(tokens.float(), labels=labels)
         # prototypes = engine._model.build_image_prototypes(image, instances)
@@ -75,6 +77,8 @@ def bg_prototype_forward(engine, batch) -> None:
     for image, instances in zip(*batch):
         image_ids = instances['image_ids']
         instances = Instances(
+            image_height=image.shape[-2],
+            image_width=image.shape[-1],
             bboxes=instances['bboxes'],
             class_ids=instances['category_ids'],
             labels=instances['category_names'],
@@ -82,9 +86,17 @@ def bg_prototype_forward(engine, batch) -> None:
             image_id=image_ids,
         )
 
-        features = engine._model.mask_generator(image[None])
-        masks = torch.nn.functional.interpolate(instances.masks[None], features.shape[2:], mode='nearest')[0]
+        features = engine._model.backbone(image[None])
 
+        if instances.masks is not None:
+            masks = instances.masks[None]
+        else:
+            masks = torch.zeros((1, len(instances.bboxes), *image.shape[1:]), dtype=torch.uint8)
+            for i, bbox in enumerate(instances.bboxes):
+                x1, y1, x2, y2 = bbox.int()
+                masks[0, i, y1:y2, x1:x2].fill_(1)
+
+        masks = torch.nn.functional.interpolate(masks, features.shape[2:], mode='nearest')[0]
         masks = masks.to(torch.bool)
         features = features.squeeze(0).flatten(1).permute(1, 0)
 
@@ -118,7 +130,9 @@ def compress(tensor, n_clst=5):
 def collate_and_write(
     engine, filename: str, clean: bool = True, reduction: str = 'per_class_avg', cluster_size: int = 10
 ) -> None:
-    root = os.path.join(engine._cfg.io.file_io.root, engine._cfg.build.model, engine._cfg.io.file_io.folder_name)
+    model_name = engine._cfg.build.model
+    dataset_name = engine._cfg.build[model_name]['dataset']
+    root = os.path.join(engine._cfg.io.file_io.root, model_name, dataset_name, engine._cfg.io.file_io.folder_name)
     _post_process_prototypes(root, filename, clean, reduction, cluster_size)
 
 
@@ -148,7 +162,7 @@ def _post_process_prototypes(
     logger.info(f'Found {len(valid_files)} prototypes')
 
     filename = os.path.join(root, filename)
-    logger.info('Saving final prototypes to {filename}')
+    logger.info(f'Saving final prototypes to {filename}')
 
     if reduction in ['per_class_avg', 'per_class_cluster']:
         average_embeddings = {label: [] for label in prototypes.labels}
@@ -172,6 +186,7 @@ def _post_process_prototypes(
     elif reduction == 'inter_class_avg':
         assert cluster_size > 0
         embeddings = compress(prototypes.embeddings, cluster_size)
+        breakpoint()
         ProtoTypes(embeddings, labels=['background'] * embeddings.shape[0]).save(filename)
     elif reduction.lower() == 'none':
         prototypes.save(filename)

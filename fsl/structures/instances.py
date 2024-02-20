@@ -26,17 +26,21 @@ Array = Union[np.ndarray, torch.Tensor]
 
 @dataclass
 class Instances(object):
+    image_height: int
+    image_width: int
     bboxes: List[Coord] = field(default_factory=lambda: [])
     masks: Array = None
     labels: List[str] = field(default_factory=lambda: [])
     class_ids: List[int] = field(default_factory=lambda: [])
-    bbox_fmt: BoundingBoxFormat = BoundingBoxFormat.XYWH
+    scores: List[float] = field(default_factory=lambda: [])
+    bbox_fmt: Union[BoundingBoxFormat, str] = BoundingBoxFormat.XYWH
     image_id: str = ""
-    image_height: int = -1
-    image_width: int = -1
 
     def __post_init__(self):
-        size = max(len(self.bboxes), self.masks.shape[0] if self.masks is not None else 0, len(self.class_ids))
+        if isinstance(self.bbox_fmt, str):
+            self.bbox_fmt = getattr(BoundingBoxFormat, self.bbox_fmt.upper())
+
+        size = max(len(self.bboxes), len(self.masks) if self.masks is not None else 0, len(self.class_ids))
         if len(self.bboxes) > 0:
             assert len(self.bboxes) == size, f'Incorect size {len(self.bboxes)} != {size}'
         if len(self.class_ids) > 0:
@@ -44,16 +48,28 @@ class Instances(object):
         if self.labels:
             assert len(self.labels) == size, f'Incorect size {len(self.labels)} != {size}'
         if self.masks is not None:
-            assert self.masks.shape[0] == size, f'Incorect size {len(self.masks)} != {size}'
+            assert len(self.masks) == size, f'Incorect size {len(self.masks)} != {size}'
 
-    def convert_bbox_fmt(self, bbox_fmt: BoundingBoxFormat) -> 'Instances':
+            self.image_width, self.image_height = (
+                (self.masks.shape[1:][::-1])
+                if any(dim == -1 for dim in (self.image_width, self.image_height))
+                else (self.image_width, self.image_height)
+            )
+        self._size = size
+
+    def convert_bbox_fmt(self, bbox_fmt: Union[BoundingBoxFormat, str]) -> 'Instances':
         assert len(self.bboxes) > 0, 'No bounding box instance'
-        for i, bbox in enumerate(self.bboxes):
+
+        if isinstance(bbox_fmt, str):
+            bbox_fmt = getattr(BoundingBoxFormat, bbox_fmt.upper())
+
+        instances = deepcopy(self)
+        for i, bbox in enumerate(instances.bboxes):
             bbox = torch.as_tensor(bbox) if not isinstance(bbox, torch.Tensor) else bbox
-            bbox = functional.convert_format_bounding_box(bbox, self.bbox_fmt, bbox_fmt)
-            self.bboxes[i] = bbox if isinstance(bbox, torch.Tensor) else bbox.cpu().numpy()
-            self.bbox_fmt = bbox_fmt
-        return self
+            bbox = functional.convert_format_bounding_box(bbox, instances.bbox_fmt, bbox_fmt)
+            instances.bboxes[i] = bbox if isinstance(instances.bboxes[i], torch.Tensor) else bbox.cpu().numpy()
+        instances.bbox_fmt = bbox_fmt
+        return instances
 
     def to_tensor(self, device: str = 'cpu') -> 'Instances':
         instances = deepcopy(self)
@@ -63,8 +79,33 @@ class Instances(object):
             instances.masks = torch.as_tensor(instances.masks).to(device)
         if len(instances.class_ids) > 0:
             instances.class_ids = torch.as_tensor(instances.class_ids).to(device)
+        if len(instances.scores) > 0:
+            instances.scores = torch.as_tensor(instances.scores).to(device)
         return instances
 
     def repeat(self, n: int) -> List['Instances']:
         assert n > 0
         return [deepcopy(self) for i in range(n)]
+
+    def resize(self, new_hw: List[int]) -> 'Instances':
+        assert len(new_hw) == 2
+        if any(dim == -1 for dim in (self.image_width, self.image_height)):
+            print('Cannot resize as current instance image size is unknown')
+            return
+
+        instance = self.to_tensor()
+        if len(instance.bboxes):
+            instance.bboxes = functional.resize_bounding_box(
+                instance.bboxes, size=new_hw, spatial_size=(self.image_height, self.image_width)
+            )[0]
+
+        if instance.masks is not None:
+            instance.masks = functional.resize(
+                instance.masks, new_hw, functional.InterpolationMode.NEAREST, antialias=True
+            )
+
+        instance.image_height, instance.image_width = new_hw
+        return instance
+
+    def __len__(self) -> int:
+        return self._size

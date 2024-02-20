@@ -111,7 +111,7 @@ def build_clip_sam_fsod(
     all_classes_fn: str = None,
     seen_classes_fn: str = None,
 ) -> TextFSOD:
-    from fsl.models.sam_relational import build_sam_auto_mask_generator
+    from fsl.models.sam_utils import build_sam_auto_mask_generator
 
     mask_generator = build_sam_auto_mask_generator(sam_args, mask_gen_args)
     return _build_text_fsod(
