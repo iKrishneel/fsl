@@ -35,7 +35,8 @@ setup(
             'clip @ git+https://github.com/openai/CLIP.git',
             'timm',
             'segment-anything',
-            'ultralytics',
+            'ultralytics==8.1',
+            'fast_pytorch_kmeans',
         ],
         'dev': [
             'jupyterlab',

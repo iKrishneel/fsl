@@ -19,17 +19,26 @@ _Tensor = Type[torch.Tensor]
 
 
 def prepare_noisy_boxes(
-    gt_boxes: List[_Tensor], im_shape: List[int], bb_fmt: BBFmt = BBFmt.XYXY, box_noise_scale: float = 1.0, n: int = 5
+    gt_boxes: List[_Tensor],
+    im_shape: List[int],
+    bb_fmt: BBFmt = BBFmt.XYXY,
+    box_noise_scale: List[float] = [1.0, 2.5],
+    n: int = 5,
+    random_center: bool = True,
 ) -> List[_Tensor]:
-    # assert isinstance(gt_boxes, torch.Tensor)
     noisy_boxes = []
     h, w = np.array(im_shape, dtype=np.float32)
+
+    scale_range = torch.abs(torch.sub(*box_noise_scale))
+    box_noise_scale = torch.rand((n, 1)) * scale_range + 0.5 if isinstance(box_noise_scale, list) else 1.0
+
     for box in gt_boxes:
         box = box.repeat(n, 1)
         box_ccwh = functional.convert_format_bounding_box(box, bb_fmt, BBFmt.CXCYWH)
 
         diff = torch.zeros_like(box_ccwh)
-        diff[:, :2] = box_ccwh[:, 2:] / 2
+        if random_center:
+            diff[:, :2] = box_ccwh[:, 2:] / 2
         diff[:, 2:] = box_ccwh[:, 2:] / 2
 
         rand_sign = torch.randint_like(box_ccwh, low=0, high=2, dtype=torch.float32) * 2.0 - 1.0

@@ -265,7 +265,7 @@ class ArgumentNoisyBBoxes(object):
     pos_ratio: float = 0.25
     proposal_thresh: List[float] = field(default_factory=lambda: [0.3, 0.7])
     labels: List[int] = field(default_factory=lambda: [0, -1, 1])
-    background_id: int = 0
+    background_id: int = -1
     batch_size_per_image: int = 128
 
     def __post_init__(self):
@@ -281,7 +281,9 @@ class ArgumentNoisyBBoxes(object):
 
         gt_bboxes = [gt_bbox.reshape(-1, 4) for gt_bbox in gt_bboxes]
         img_hw = image.shape[1:]
-        noisy_bboxes = prepare_noisy_boxes(gt_bboxes, img_hw, n=self.sample_size)
+        noisy_bboxes = prepare_noisy_boxes(
+            gt_bboxes, img_hw, n=self.sample_size, random_center=np.random.choice([True, False])
+        )
         bboxes = torch.cat([torch.cat([gt_bboxes[i], noisy_bboxes[i]]) for i in range(len(gt_bboxes))])
 
         match_quality_matrix = box_iou(torch.cat(gt_bboxes), bboxes)
@@ -293,10 +295,10 @@ class ArgumentNoisyBBoxes(object):
             assert torch.all(matched_labels == 0)
             class_labels = torch.zeros_like(matched_idxs)
 
+        class_labels[matched_labels == -1] = -100
         class_labels[matched_labels == 0] = self.background_id
-        class_labels[matched_labels == -1] = -1
 
-        positive = ((class_labels != -1) & (class_labels != self.background_id)).nonzero().flatten()
+        positive = ((class_labels != -100) & (class_labels != self.background_id)).nonzero().flatten()
         negative = (class_labels == self.background_id).nonzero().flatten()
 
         num_pos = int(self.batch_size_per_image * self.pos_ratio)
@@ -312,15 +314,17 @@ class ArgumentNoisyBBoxes(object):
         neg_idx = negative[perm2]
         sampled_idxs = torch.cat([pos_idx, neg_idx], dim=0)
 
-        bboxes = bboxes[sampled_idxs]
+        # bboxes =
         class_labels = class_labels[sampled_idxs]
 
         mapping = {int(class_ids[i]): names[i] for i in range(len(class_ids))}
         mapping[self.background_id] = 'background'
         names = [mapping[int(i)] for i in class_labels]
 
+        breakpoint()
+
         data['image'] = image
-        data['bboxes'] = bboxes
-        data['category_ids'] = class_labels
+        data['bboxes'] = bboxes[sampled_idxs]
+        data['category_ids'] = torch.Tensor(class_labels)
         data['category_names'] = names
         return data

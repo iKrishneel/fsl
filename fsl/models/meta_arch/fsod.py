@@ -90,16 +90,31 @@ class MaskFSOD(FSOD):
         super(MaskFSOD, self).__init__(**kwargs)
         self.mask_generator = mask_generator
 
-    @torch.no_grad()
-    def forward(self, image: _Tensor) -> Instances:
-        image = image.to(self.dtype)
-        im_np = image.permute(1, 2, 0).cpu().numpy()
+    def forward(self, images: _Tensor, targets: List[Dict[str, Instances]] = None) -> Instances:
+        if not self.training:
+            assert len(images.shape) == 3, 'Batch inference is currently not supported'
+            return self.inference(images)
 
-        instances = self.mask_generator.get_proposals(im_np)
+        raise NotImplementedError('MaskFSOD training is not yet implemented')
+
+    @torch.no_grad()
+    def inference(self, image: _Tensor) -> Instances:
+        # image = image.to(self.dtype)
+        # im_np = image.permute(1, 2, 0).cpu().numpy()
+        # instances = self.mask_generator.get_proposals(im_np)
+
+        instances = self.get_proposals(image)
         image = image[None] if len(image.shape) == 3 else image
         response = super(MaskFSOD, self).inference(image, instances)
         # response[0].update({'instances': instances})
         instances.scores = response[0]['scores']
+        return instances
+
+    @torch.inference_mode()
+    def get_proposals(self, image: _Tensor) -> Instances:
+        image = image.to(self.dtype)
+        im_np = image.permute(1, 2, 0).cpu().numpy()
+        instances = self.mask_generator.get_proposals(im_np)
         return instances
 
     def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True):
