@@ -322,8 +322,6 @@ class ArgumentNoisyBBoxes(object):
         mapping[self.background_id] = 'background'
         names = [mapping[int(i)] for i in class_labels]
 
-        breakpoint()
-
         data['image'] = image
         data['bboxes'] = bboxes[sampled_idxs]
         data['category_ids'] = torch.Tensor(class_labels)
