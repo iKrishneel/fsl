@@ -100,8 +100,6 @@ def bg_prototype_forward(engine, batch) -> None:
         masks = masks.to(torch.bool)
         features = features.squeeze(0).flatten(1).permute(1, 0)
 
-        breakpoint()
-
         prototypes = None
         for i, mask in enumerate(masks):
             mask = mask.flatten()
