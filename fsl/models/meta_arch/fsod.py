@@ -46,7 +46,7 @@ class FSOD(nn.Module):
         loss_dict = self.classifier(roi_features, class_labels)
         return loss_dict
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def inference(self, images: _Tensor, instances: Instances) -> Tuple[Dict[str, Any]]:
         features = self.backbone(images)
         instances = instances.convert_bbox_fmt('xyxy').to_tensor(self.device)
@@ -97,7 +97,7 @@ class MaskFSOD(FSOD):
 
         raise NotImplementedError('MaskFSOD training is not yet implemented')
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def inference(self, image: _Tensor) -> Instances:
         # image = image.to(self.dtype)
         # im_np = image.permute(1, 2, 0).cpu().numpy()
@@ -115,7 +115,7 @@ class MaskFSOD(FSOD):
         image = image.to(self.dtype)
         im_np = image.permute(1, 2, 0).cpu().numpy()
         instances = self.mask_generator.get_proposals(im_np)
-        return instances
+        return instances.convert_bbox_fmt('xyxy')
 
     def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True):
         for key in self.mask_generator.state_dict():
@@ -134,7 +134,10 @@ class MaskFSOD(FSOD):
 
     @property
     def dtype(self) -> torch.dtype:
-        return self.classifier.fc_other_class.weight.dtype
+        dtype = self.classifier.fc_other_class.weight.dtype
+        if hasattr(self.mask_generator, 'dtype'):
+            dtype = self.mask_generator.dtype
+        return dtype
 
 
 def _build_fsod(

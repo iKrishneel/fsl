@@ -108,6 +108,10 @@ class SamAutomaticMaskGenerator(nn.Module, _SAMG):
     def device(self) -> torch.device:
         return self.predictor.device
 
+    @property
+    def dtype(self) -> torch.dtype:
+        return self.predictor.model.image_encoder.patch_embed.proj.weight.dtype
+
 
 def get_sam_model(name: str = 'default'):
     import os
