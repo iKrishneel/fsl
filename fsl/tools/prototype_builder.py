@@ -186,7 +186,6 @@ def _post_process_prototypes(
     elif reduction == 'inter_class_avg':
         assert cluster_size > 0
         embeddings = compress(prototypes.embeddings, cluster_size)
-        breakpoint()
         ProtoTypes(embeddings, labels=['background'] * embeddings.shape[0]).save(filename)
     elif reduction.lower() == 'none':
         prototypes.save(filename)
