@@ -19,7 +19,7 @@ install_requires = [
     'torchvision',
     'tqdm',
     'pytest',
-    'igniter==1.0.0',
+    'igniter>=1.0.0',
 ]
 
 setup(
