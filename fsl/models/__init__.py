@@ -3,3 +3,4 @@
 # from .clip import build_clip  # NOQA: F401
 from .devit import devit_sam  # NOQA: F401
 from .meta_arch import *  # NOQA: F401, F403
+from .sam_rpn import *  # NOQA: F401, F403

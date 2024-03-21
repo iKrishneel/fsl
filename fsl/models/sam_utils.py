@@ -85,6 +85,7 @@ class SamAutomaticMaskGenerator(nn.Module, _SAMG):
             images = [np.asarray(image) for image in images]
         return self.predictor.set_images(images)
 
+    @torch.inference_mode()
     def get_proposals(self, image: Union[_Image, np.ndarray]) -> List[Instances]:
         image = np.asarray(image)
         if image.dtype == np.float32:

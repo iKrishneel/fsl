@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 
+import os
 import numpy as np
 import torch
 from ultralytics.models.fastsam import FastSAM
+from ultralytics.utils import DEFAULT_CFG
 
 from fsl.structures import Instances
 
@@ -17,6 +19,7 @@ class FastSAMMaskGenerator(torch.nn.Module):
             return self.get_proposals(image)
         raise NotImplementedError('Training routing is not implemented')
 
+    @torch.inference_mode()
     def get_proposals(self, image: np.ndarray) -> Instances:
         im_shape = image.shape[:2]
         if image.dtype != np.uint8:
@@ -33,12 +36,17 @@ class FastSAMMaskGenerator(torch.nn.Module):
         )
         return instances
 
+    @torch.no_grad()
     def eval(self, *args, **kwargs):
-        pass
+        return self
 
     def train(self, *args, **kwargs):
-        pass
+        return self
 
 
-def build_fast_sam_mask_generator(model: str = 'FastSAM-x', **kwargs) -> FastSAMMaskGenerator:
+def build_fast_sam_mask_generator(model: str = None, **kwargs) -> FastSAMMaskGenerator:
+    model = model or os.path.join(os.environ['HOME'], '.cache/torch/ultralytics/fastsam/FastSAM-x.pt')
+    os.makedirs(os.path.dirname(model), exist_ok=True)
+
+    DEFAULT_CFG.verbose = False
     return FastSAMMaskGenerator(model)

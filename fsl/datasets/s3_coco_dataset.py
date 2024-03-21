@@ -170,6 +170,33 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
         return data
 
 
+@dataset_registry('coco_detection')
+class S3CocoDatasetForDetection(S3CocoDataset):
+    def __init__(self, bucket_name: str, root: str, anno_fn: str, **kwargs):
+        super(S3CocoDatasetForDetection, self).__init__(bucket_name, root, anno_fn, **kwargs)
+        self.apply_transforms = False
+
+    def __getitem__(self, index: int):
+        image, targets = super().__getitem__(index)
+
+        image = image.convert('RGB') if image.mode != 'RBG' else image
+        image = functional.pil_to_tensor(image)
+
+        bboxes = torch.as_tensor([target['bbox'] for target in targets])
+        category_ids = [target['category_id'] for target in targets]
+        iids = [target['image_id'] for target in targets]
+
+        data = {
+            'image': image,
+            'bboxes': bboxes,
+            'category_ids': category_ids,
+            'image_ids': iids,
+        }
+
+        data = self.transforms(data)
+        return data
+
+
 @dataset_registry('fs_coco')
 class S3CocoDatasetFS(S3CocoDataset):
     def __init__(
@@ -329,7 +356,7 @@ def collate_data_instances(batches: List[Dict[str, Any]]) -> List[Any]:
         instances = Instances(
             bboxes=batch['bboxes'],
             class_ids=batch['category_ids'],
-            labels=batch['category_names'],
+            labels=batch['category_names' if 'category_names' in batch else 'category_ids'],
             bbox_fmt=BoundingBoxFormat.XYXY,
             image_id=batch['image_ids'][0],
             image_width=image.shape[-1],

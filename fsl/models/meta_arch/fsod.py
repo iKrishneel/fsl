@@ -340,6 +340,36 @@ def build_dinov2_fsod(
     return _build_fsod(DinoV2Patch(backbone), roi_pool_size, prototype_file, background_prototype_file, label_map_file)
 
 
+class DinoV2Patch(nn.Module):
+    def __init__(self, backbone):
+        super(DinoV2Patch, self).__init__()
+        self.backbone = backbone.eval()
+
+    @torch.no_grad()
+    def forward(self, image: _Tensor) -> _Tensor:
+        im_dtype = image.dtype
+        image = image.to(self.device).to(self.dtype)
+        outputs = self.backbone.get_intermediate_layers(image, n=[self.backbone.n_blocks - 1], reshape=True)
+        return outputs[0].to(im_dtype) if self.training else outputs[0]
+
+    @property
+    def downsize(self) -> int:
+        return self.backbone.patch_size
+
+    @property
+    def device(self):
+        return self.backbone.patch_embed.proj.weight.device
+
+    @property
+    def dtype(self):
+        return self.backbone.patch_embed.proj.weight.dtype
+
+    @classmethod
+    def build(cls, model_name: str):
+        backbone = torch.hub.load('facebookresearch/dinov2', model_name)
+        return cls(backbone)
+
+
 @model_registry
 def devit_dinov2_fsod(
     model_name: str = 'dinov2_vitb14',
@@ -349,37 +379,13 @@ def devit_dinov2_fsod(
     label_map_file: str = None,
     rpn_args: Dict[str, Any] = None,
 ) -> FSOD:
-    backbone = torch.hub.load('facebookresearch/dinov2', model_name)
-
-    class DinoV2Patch(nn.Module):
-        def __init__(self, backbone):
-            super(DinoV2Patch, self).__init__()
-            self.backbone = backbone.eval()
-
-        @torch.no_grad()
-        def forward(self, image: _Tensor) -> _Tensor:
-            im_dtype = image.dtype
-            image = image.to(self.device).to(self.dtype)
-            outputs = self.backbone.get_intermediate_layers(image, n=[self.backbone.n_blocks - 1], reshape=True)
-            return outputs[0].to(im_dtype) if self.training else outputs[0]
-
-        @property
-        def downsize(self) -> int:
-            return self.backbone.patch_size
-
-        @property
-        def device(self):
-            return self.backbone.patch_embed.proj.weight.device
-
-        @property
-        def dtype(self):
-            return backbone.patch_embed.proj.weight.dtype
+    # backbone = torch.hub.load('facebookresearch/dinov2', model_name)
 
     for param in backbone.parameters():
         param.requires_grad = False
 
     model = _build_fsod(
-        DinoV2Patch(backbone.to(torch.float16)),
+        DinoV2Patch.build(model_name).to(torch.float16),  # (backbone.to(torch.float16)),
         roi_pool_size,
         prototype_file,
         background_prototype_file,

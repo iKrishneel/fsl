@@ -275,10 +275,7 @@ class ArgumentNoisyBBoxes(object):
         if self.sample_size <= 0:
             return data
 
-        image, gt_bboxes, class_ids, names = [
-            data[key] for key in ['image', 'bboxes', 'category_ids', 'category_names']
-        ]
-
+        image, gt_bboxes, class_ids = [data[key] for key in ['image', 'bboxes', 'category_ids']]
         gt_bboxes = [gt_bbox.reshape(-1, 4) for gt_bbox in gt_bboxes]
         img_hw = image.shape[1:]
         noisy_bboxes = prepare_noisy_boxes(

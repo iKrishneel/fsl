@@ -1,0 +1,93 @@
+driver: "fsl.main"
+device: "cuda"
+
+workdir:
+  path: "/tmp/fsl/sam_rpn/"
+  unique: False
+
+distributed:
+  nproc_per_node: 4
+
+io:
+  checkpoint:
+    engine: 's3_writer'
+    bucket_name: &bucket "sr-shokunin"
+    root: "perception/models/fsl/sam_rpn/"
+  
+models:
+  sam_rpn:
+    model_name: "dinov2_vitb14"
+    sam_args:
+      type: "fast_sam"
+
+datasets:
+  dataloader:
+    batch_size: 1
+    num_workers: 0
+    collate_fn: "collate_data_instances"
+  coco_detection:
+    # val:
+    #   bucket_name: *bucket
+    #   root: "perception/datasets/coco/train2017"
+    #   anno_fn: "perception/datasets/coco/annotations/instances_train2017.json"
+    train:
+      bucket_name: "sr-shokunin"
+      root: "perception/datasets/coco/val2017"
+      anno_fn: "perception/datasets/coco/annotations/instances_val2017.json"
+
+transforms:
+  train: &trans
+    engine: "torchvision.transforms"
+    ConvertFormatBoundingBox:
+      old_fmt: "XYWH"
+      new_fmt: "XYXY"
+    VHFlip:
+      hflip: True
+      vflip: True
+    ResizeLongestSide:
+      size: 1024
+    PadToSize:
+      size: 1024
+    ResizeToDivisible:
+     factor: 14
+    Normalize:
+      mean: [0.48145466, 0.4578275, 0.40821073]
+      std: [0.26862954, 0.26130258, 0.27577711]
+      
+  val:
+    <<: *trans
+    VHFlip:
+      hflip: False
+      vflip: False
+    ArgumentNoisyBBoxes:
+      sample_size: 0
+
+solvers:
+  engine: "torch.optim"
+  snapshot: 5000
+
+  SGD:
+    lr: 0.001
+    momentum: 0.5
+  schedulers:
+    StepLR:
+      step_size: 5
+      gamma: 0.1
+
+build:
+  sam_rpn:
+    dataset: "coco_detection"
+    transforms: "train"
+    train:
+      solver: "SGD"
+      scheduler: "StepLR"
+      epochs: 50
+    val:
+      func: "default_val_forward"
+      transforms: "val"
+
+  model: "sam_rpn"
+
+options:
+  train: True
+  eval: False
