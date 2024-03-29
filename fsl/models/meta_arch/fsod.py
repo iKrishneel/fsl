@@ -343,7 +343,8 @@ def build_dinov2_fsod(
 class DinoV2Patch(nn.Module):
     def __init__(self, backbone):
         super(DinoV2Patch, self).__init__()
-        self.backbone = backbone.eval()
+        self.backbone = backbone
+        self.backbone.eval()
 
     @torch.no_grad()
     def forward(self, image: _Tensor) -> _Tensor:
@@ -379,7 +380,7 @@ def devit_dinov2_fsod(
     label_map_file: str = None,
     rpn_args: Dict[str, Any] = None,
 ) -> FSOD:
-    # backbone = torch.hub.load('facebookresearch/dinov2', model_name)
+    backbone = torch.hub.load('facebookresearch/dinov2', model_name)
 
     for param in backbone.parameters():
         param.requires_grad = False

@@ -272,10 +272,13 @@ class ArgumentNoisyBBoxes(object):
         self.proposal_matcher = Matcher(self.proposal_thresh, self.labels)
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        if self.sample_size <= 0:
+        if self.sample_size <= 0 or not np.random.choice([True, False]):
             return data
 
-        image, gt_bboxes, class_ids = [data[key] for key in ['image', 'bboxes', 'category_ids']]
+        image, gt_bboxes, class_ids, names = [
+            data[key] for key in ['image', 'bboxes', 'category_ids', 'category_names']
+        ]
+
         gt_bboxes = [gt_bbox.reshape(-1, 4) for gt_bbox in gt_bboxes]
         img_hw = image.shape[1:]
         noisy_bboxes = prepare_noisy_boxes(
@@ -324,3 +327,4 @@ class ArgumentNoisyBBoxes(object):
         data['category_ids'] = torch.Tensor(class_labels)
         data['category_names'] = names
         return data
+

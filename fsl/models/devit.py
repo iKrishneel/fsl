@@ -277,7 +277,7 @@ class DeVit(nn.Module):
             for i in range(class_topk):
                 cmask = indexes != class_indices[:, i].view(-1, 1, 1)
                 _ = torch.gather(
-                    feats, 2, indexes[cmask].view(bs, spatial_size, num_classes - 1)
+                    feats, 2, indexes[cmask].view(bs, spatial_size, max(num_classes - 1, 1))
                 )  # N x spatial x classes-1
                 other_classes.append(_[:, None, :, :])
         else:
