@@ -35,16 +35,6 @@ def file_writer(io_cfg: Dict[str, str], cfg: DictConfig) -> Callable:
 @func_registry
 def prototype_forward(engine, batch) -> None:
     for image, instances in zip(*batch):
-        image_ids = instances['image_ids']
-        instances = Instances(
-            image_height=image.shape[-2],
-            image_width=image.shape[-1],
-            bboxes=instances['bboxes'],
-            class_ids=instances['category_ids'],
-            labels=instances['category_names'],
-            masks=instances.get('masks', None),
-            image_id=image_ids,
-        )
 
         def bboxes2mask(bboxes: torch.Tensor, img_hw: List[int]) -> torch.Tensor:
             mask = torch.zeros(len(bboxes), *img_hw)
@@ -56,6 +46,10 @@ def prototype_forward(engine, batch) -> None:
 
         features = engine._model.backbone(image[None])
         masks = bboxes2mask(instances.bboxes, image.shape[1:])
+
+        if masks.shape[0] == 0:
+            breakpoint()
+
         masks = torch.nn.functional.interpolate(masks[None], features.shape[2:], mode='nearest')[0]
         masks = masks.to(torch.bool).to(features.device)
 
@@ -69,22 +63,22 @@ def prototype_forward(engine, batch) -> None:
 
         prototypes = ProtoTypes(tokens.float(), labels=labels)
         # prototypes = engine._model.build_image_prototypes(image, instances)
-        engine.file_io(prototypes, image_ids[0], engine._cfg.build.model)
+        engine.file_io(prototypes, instances.image_id, engine._cfg.build.model)
 
 
 @func_registry
 def bg_prototype_forward(engine, batch) -> None:
     for image, instances in zip(*batch):
-        image_ids = instances['image_ids']
-        instances = Instances(
-            image_height=image.shape[-2],
-            image_width=image.shape[-1],
-            bboxes=instances['bboxes'],
-            class_ids=instances['category_ids'],
-            labels=instances['category_names'],
-            masks=instances.get('masks', None),
-            image_id=image_ids,
-        )
+        # image_ids = instances['image_ids']
+        # instances = Instances(
+        #     image_height=image.shape[-2],
+        #     image_width=image.shape[-1],
+        #     bboxes=instances['bboxes'],
+        #     class_ids=instances['category_ids'],
+        #     labels=instances['category_names'],
+        #     masks=instances.get('masks', None),
+        #     image_id=image_ids,
+        # )
 
         features = engine._model.backbone(image[None])
 
@@ -111,7 +105,7 @@ def bg_prototype_forward(engine, batch) -> None:
             pt = ProtoTypes(embeddings=bg_tokens.float(), labels=labels)
             prototypes = pt if prototypes is None else prototypes + pt
 
-        engine.file_io(prototypes, image_ids[0], engine._cfg.build.model, prefix=str(engine.state.epoch) + '_')
+        engine.file_io(prototypes, instances.image_id, engine._cfg.build.model, prefix=str(engine.state.epoch) + '_')
 
 
 def compress(tensor, n_clst=5):

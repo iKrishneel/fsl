@@ -103,23 +103,22 @@ class DeVit(nn.Module):
         self.hidden_dim = 256
         self.num_cls_layers = 3
 
-        cls_input_dim = self.temb * 2
+        self.bg_cls_weight = 0.0
 
         if fg_prototypes:
             self._setup_prototypes(fg_prototypes, all_cids, seen_cids, is_bg=False)
 
-        self.bg_cls_weight = 0.0
-
         if bg_prototypes:
             self._setup_prototypes(bg_prototypes, all_cids, seen_cids, is_bg=True)
-            self.bg_cls_weight = 0.2
-            cls_input_dim += self.t_bg_emb
+            # self.bg_cls_weight = 0.2
+            # cls_input_dim += self.t_bg_emb
         else:
+            cls_input_dim = self.temb * 2
             self.bg_tokens, self.fc_back_class, self.bg_cnn = None, None, None
+            self.per_cls_cnn = PropagateNet(cls_input_dim, self.hidden_dim, num_layers=self.num_cls_layers)
 
         self.fc_other_class = nn.Linear(self.t_len, self.temb)
         self.fc_intra_class = nn.Linear(self.t_pos_emb, self.temb)
-        self.per_cls_cnn = PropagateNet(cls_input_dim, self.hidden_dim, num_layers=self.num_cls_layers)
 
         self._all_cids = all_cids
 
@@ -128,10 +127,11 @@ class DeVit(nn.Module):
     ) -> None:
         if is_bg:
             self.register_buffer('bg_tokens', prototypes.normalized_embedding)
-            self.fc_bg_class = nn.Linear(self.t_len, self.temb)
-            self.fc_back_class = nn.Linear(len(self.bg_tokens), self.t_bg_emb)
-            bg_input_dim = self.temb + self.t_bg_emb
-            self.bg_cnn = PropagateNet(bg_input_dim, self.hidden_dim, num_layers=self.num_cls_layers)
+            self._init_bg_layers()
+            # self.fc_bg_class = nn.Linear(self.t_len, self.temb)
+            # self.fc_back_class = nn.Linear(len(self.bg_tokens), self.t_bg_emb)
+            # bg_input_dim = self.temb + self.t_bg_emb
+            # self.bg_cnn = PropagateNet(bg_input_dim, self.hidden_dim, num_layers=self.num_cls_layers)
         else:
             pt = prototypes.check(all_cids)
             train_class_order = [pt.labels.index(c) for c in seen_cids]
@@ -140,6 +140,15 @@ class DeVit(nn.Module):
 
             self.register_buffer('train_class_weight', pt.normalized_embedding[torch.as_tensor(train_class_order)])
             self.register_buffer('test_class_weight', pt.normalized_embedding[torch.as_tensor(test_class_order)])
+
+    def _init_bg_layers(self) -> None:
+        self.bg_cls_weight = 0.2
+        self.fc_bg_class = nn.Linear(self.t_len, self.temb)
+        self.fc_back_class = nn.Linear(len(self.bg_tokens), self.t_bg_emb)
+        bg_input_dim = self.temb + self.t_bg_emb
+        self.bg_cnn = PropagateNet(bg_input_dim, self.hidden_dim, num_layers=self.num_cls_layers)
+        cls_input_dim = self.temb * 2 + self.t_bg_emb
+        self.per_cls_cnn = PropagateNet(cls_input_dim, self.hidden_dim, num_layers=self.num_cls_layers)
 
     def forward(self, roi_features: _Tensor, class_labels: _Tensor = None) -> Dict[str, Any]:
         if not self.training:
@@ -151,7 +160,7 @@ class DeVit(nn.Module):
         class_topk = self.num_sample_class if self.num_sample_class > 0 else num_classes
         class_topk = min(class_topk, num_classes)
 
-        sample_class_enabled = class_topk > 0
+        sample_class_enabled = class_topk > 1
         num_active_classes, class_indices = num_classes, None
 
         if sample_class_enabled:
@@ -276,16 +285,16 @@ class DeVit(nn.Module):
             indexes = torch.arange(0, num_classes, device=self.device)[None, None, :].repeat(bs, spatial_size, 1)
             for i in range(class_topk):
                 cmask = indexes != class_indices[:, i].view(-1, 1, 1)
-                _ = torch.gather(
-                    feats, 2, indexes[cmask].view(bs, spatial_size, max(num_classes - 1, 1))
+                fts = torch.gather(
+                    feats, 2, indexes[cmask].view(bs, spatial_size, num_classes - 1)
                 )  # N x spatial x classes-1
-                other_classes.append(_[:, None, :, :])
+                other_classes.append(fts[:, None, :, :])
         else:
-            for c in range(num_classes):  # TODO: change to classes sampling during training for LVIS type datasets
+            for c in range(num_classes):
                 cmask = torch.ones(num_classes, device=self.device, dtype=torch.bool)
                 cmask[c] = False
-                _ = feats[:, :, cmask]  # # N x spatial x classes-1
-                other_classes.append(_[:, None, :, :])
+                fts = feats[:, :, cmask]  # # N x spatial x classes-1
+                other_classes.append(fts[:, None, :, :])
 
         other_classes = torch.cat(other_classes, dim=1)  # N x spatial x classes x classes-1
         other_classes = other_classes.flatten(0, 1)  # (Nxclasses) x spatial x classes-1
@@ -405,6 +414,9 @@ class DeVit(nn.Module):
             loss = loss.mean()
 
         return loss
+
+    # def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True, assign: bool = False) -> Any:
+    #    return super(DeVit, self).load_state_dict(state_dict, strict)
 
     @property
     def device(self) -> torch.device:
@@ -553,12 +565,10 @@ def build_devit(
 
         all_cids = list(label_map['all_classes'].values())
         seen_cids = list(label_map['seen_classes'].values())
-
-    if prototype_file:
-        prototypes = ProtoTypes.load(prototype_file)
     else:
-        prototypes, all_cids, seen_cids = None, None, None
+        all_cids, seen_cids = None, None
 
+    prototypes = ProtoTypes.load(prototype_file) if prototype_file else None
     bg_prototypes = ProtoTypes.load(background_prototype_file) if background_prototype_file else None
     return DeVit(prototypes, bg_prototypes, all_cids, seen_cids)
 
@@ -580,7 +590,6 @@ def build_devit_sam(
 
         all_cids = list(label_map['all_classes'].values())
         seen_cids = list(label_map['seen_classes'].values())
-        breakpoint()
 
     if prototype_file:
         prototypes = ProtoTypes.load(prototype_file)

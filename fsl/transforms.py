@@ -327,4 +327,3 @@ class ArgumentNoisyBBoxes(object):
         data['category_ids'] = torch.Tensor(class_labels)
         data['category_names'] = names
         return data
-

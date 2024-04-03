@@ -37,7 +37,6 @@ class FSOD(nn.Module):
         gt_instances = [target['gt_proposal'] for target in targets]
         gt_bboxes = [gt_proposal.to_tensor().bboxes.to(self.device) for gt_proposal in gt_instances]
         class_labels = torch.cat([instance.class_ids for instance in gt_instances])
-
         class_labels[class_labels == -1] = self.classifier.train_class_weight.shape[0]
 
         im_embeddings = self.backbone(images)
@@ -82,6 +81,19 @@ class FSOD(nn.Module):
             )
             new_state_dict[new_key] = state_dict[key]
 
+        has_bg1 = any(['bg_' in key for key in self.classifier.state_dict()])
+        has_bg2 = any(['classifier.bg_' in key for key in state_dict])
+
+        for key in state_dict:
+            name = key.replace('classifier.', '')
+            if '_class_weight' in key or 'bg_tokens' in key:
+                if hasattr(self.classifier, name):
+                    delattr(self.classifier, name)
+                self.classifier.register_buffer(name, state_dict[key])
+
+        if not has_bg1 and has_bg2:
+            self.classifier._init_bg_layers()
+
         return super(FSOD, self).load_state_dict(new_state_dict, strict)
 
 
@@ -117,11 +129,11 @@ class MaskFSOD(FSOD):
         instances = self.mask_generator.get_proposals(im_np)
         return instances.convert_bbox_fmt('xyxy')
 
-    def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True):
+    def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True, assign: bool = True):
         for key in self.mask_generator.state_dict():
             state_dict[f'mask_generator.{key}'] = self.mask_generator.state_dict()[key]
 
-        return super().load_state_dict(state_dict, strict)
+        return super(MaskFSOD, self).load_state_dict(state_dict, strict, assign)
 
     def to(self, *args, **kwargs):
         ret = super().to(*args, **kwargs)

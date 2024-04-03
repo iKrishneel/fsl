@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 
-from typing import Any, Dict, Callable, Optional, Union, List
 from importlib import import_module
+from typing import Any, Callable, Dict, List, Optional, Union
+
 import torch
 import torch.nn as nn
-from torchvision.ops import RoIAlign, box_iou
 from igniter.registry import model_registry
-
+from torchvision.ops import RoIAlign, box_iou
 
 _Tensor = torch.Tensor
 

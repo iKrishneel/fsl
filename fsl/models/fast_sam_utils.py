@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import os
+
 import numpy as np
 import torch
 from ultralytics.models.fastsam import FastSAM
