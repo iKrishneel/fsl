@@ -110,8 +110,6 @@ class DeVit(nn.Module):
 
         if bg_prototypes:
             self._setup_prototypes(bg_prototypes, all_cids, seen_cids, is_bg=True)
-            # self.bg_cls_weight = 0.2
-            # cls_input_dim += self.t_bg_emb
         else:
             cls_input_dim = self.temb * 2
             self.bg_tokens, self.fc_back_class, self.bg_cnn = None, None, None
@@ -128,10 +126,6 @@ class DeVit(nn.Module):
         if is_bg:
             self.register_buffer('bg_tokens', prototypes.normalized_embedding)
             self._init_bg_layers()
-            # self.fc_bg_class = nn.Linear(self.t_len, self.temb)
-            # self.fc_back_class = nn.Linear(len(self.bg_tokens), self.t_bg_emb)
-            # bg_input_dim = self.temb + self.t_bg_emb
-            # self.bg_cnn = PropagateNet(bg_input_dim, self.hidden_dim, num_layers=self.num_cls_layers)
         else:
             pt = prototypes.check(all_cids)
             train_class_order = [pt.labels.index(c) for c in seen_cids]

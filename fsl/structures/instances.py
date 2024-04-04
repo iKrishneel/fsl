@@ -43,6 +43,7 @@ class Instances(object):
         size = max(len(self.bboxes), len(self.masks) if self.masks is not None else 0, len(self.class_ids))
         if len(self.bboxes) > 0:
             assert len(self.bboxes) == size, f'Incorect size {len(self.bboxes)} != {size}'
+            setattr(self, 'sort_by_area', self.__sort_by_area)
         if len(self.class_ids) > 0:
             assert len(self.class_ids) == size, f'Incorect size {len(self.class_ids)} != {size}'
         if self.labels:
@@ -83,6 +84,14 @@ class Instances(object):
             instances.scores = torch.as_tensor(instances.scores).to(device)
         return instances
 
+    def numpy(self):
+        instance = deepcopy(self)
+        if isinstance(instance.bboxes, torch.Tensor):
+            instance.bboxes = instance.bboxes.cpu().numpy()
+        if isinstance(instance.masks, torch.Tensor):
+            instance.masks = instance.masks.cpu().numpy()
+        return instance
+
     def repeat(self, n: int) -> List['Instances']:
         assert n > 0
         return [deepcopy(self) for i in range(n)]
@@ -105,6 +114,44 @@ class Instances(object):
             )
 
         instance.image_height, instance.image_width = new_hw
+        return instance
+
+    def __sort_by_area(self) -> 'Instances':
+        instance = self.convert_bbox_fmt('xywh') if self.bbox_fmt.value != 'XYWH' else deepcopy(self)
+        instance = instance.numpy()
+        areas = np.prod(instance.bboxes[:, 2:], axis=1)
+        sorted_indices = np.argsort(-areas).tolist()
+        instance.bboxes = instance.bboxes[sorted_indices] if instance.bboxes is not None else None
+        instance.masks = instance.masks[sorted_indices] if instance.masks is not None else None
+        instance.labels = [instance.labels[i] for i in sorted_indices] if len(instance.labels) else None
+        instance.class_ids = instance.class_ids[sorted_indices] if len(instance.class_ids) else None
+        instance.scores = instance.scores[sorted_indices] if len(instance.scores) else None
+        return instance.convert_bbox_fmt(self.bbox_fmt)
+
+    def filter(self, thresh: float = 0.5) -> 'Instances':
+        instance = deepcopy(self)
+        if len(instance.scores) == 0:
+            return instance
+
+        indices = (
+            torch.where(self.scores >= thresh)
+            if isinstance(self.scores, torch.Tensor)
+            else np.where(self.scores >= thresh)
+        )
+        indices = indices[0]
+
+        if instance.bboxes is not None:
+            instance.bboxes = instance.bboxes[indices]
+            instance._size = len(instance.bboxes)
+        if instance.masks is not None:
+            instance.masks = instance.masks[indices]
+            instance._size = len(instance.masks)
+        if len(instance.labels):
+            instance.labels = [instance.labels[int(i)] for i in indices]
+        if len(instance.class_ids):
+            instance.class_ids = instance.class_ids[indices]
+        if len(instance.scores):
+            instance.scores = instance.scores[indices]
         return instance
 
     def __len__(self) -> int:
