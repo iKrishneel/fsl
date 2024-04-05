@@ -2,7 +2,7 @@
 
 import colorsys
 from dataclasses import dataclass
-from typing import List, Optional, Type, Union
+from typing import List, Optional, Type, Union, Tuple
 
 import matplotlib as mpl
 import matplotlib.colors as mplc
@@ -10,6 +10,7 @@ import matplotlib.figure as mplfigure
 import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from PIL import Image
+import cv2 as cv
 
 from fsl.structures import Instances
 from fsl.utils import colormap
@@ -118,7 +119,13 @@ class Visualizer(object):
                 h_align = 'left'
 
             if instances.masks is not None:
-                # TODO
+                mask = instances.masks[i].astype(np.uint8) * 255
+                contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+                segment = contours[0].squeeze()
+                # segment = np.column_stack(np.where(instances.masks[i])[::-1])
+                
+                self.draw_polygon(segment, color)
+                text_pos = [*np.min(segment, axis=0).tolist(), *np.max(segment, axis=0).tolist()]
                 h_align = 'center'
 
             if instances.labels:
@@ -144,7 +151,13 @@ class Visualizer(object):
 
         return self.output
 
-    def draw_box(self, box_coord, alpha=0.5, edge_color='g', line_style='-'):
+    def draw_box(
+        self,
+        box_coord: np.ndarray,
+        alpha: float = 0.5,
+        edge_color: str = 'g',
+        line_style: str = '-'
+    ) -> VisImage:
         x, y, width, height = box_coord.astype(np.intp)
         linewidth = max(self._default_font_size / 4, 1)
         self.output.ax.add_patch(
@@ -161,16 +174,38 @@ class Visualizer(object):
         )
         return self.output
 
+    def draw_polygon(
+        self,
+        segment: np.ndarray,
+        color: Tuple[float, ...],
+        edge_color: Tuple[float, ...] = None,
+        alpha: float = 0.5
+    ) -> VisImage:
+        if edge_color is None:
+            # make edge color darker than the polygon color
+            edge_color = self._change_color_brightness(color, brightness_factor=-0.7) if alpha > 0.8 else color
+        edge_color = mplc.to_rgb(edge_color) + (1,)
+        
+        polygon = mpl.patches.Polygon(
+            segment,
+            fill=True,
+            facecolor=mplc.to_rgb(color) + (alpha,),
+            edgecolor=edge_color,
+            linewidth=max(self._default_font_size // 15 * self.output.scale, 1),
+        )
+        self.output.ax.add_patch(polygon)
+        return self.output
+
     def draw_text(
         self,
-        text,
-        position,
+        text: str,
+        position: Tuple[int, int],
         *,
-        font_size=None,
-        color="g",
-        horizontal_alignment="center",
-        rotation=0,
-    ):
+        font_size: float = None,
+        color: str = 'g',
+        horizontal_alignment: str = 'center',
+        rotation: int = 0,
+    ) -> VisImage:
         """
         Args:
             text (str): class label
@@ -208,7 +243,7 @@ class Visualizer(object):
         )
         return self.output
 
-    def _change_color_brightness(self, color, brightness_factor):
+    def _change_color_brightness(self, color: Tuple[float, ...], brightness_factor: float):
         """
         Depending on the brightness_factor, gives a lighter or darker color i.e. a color with
         less or more saturation than the original color.
