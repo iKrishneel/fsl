@@ -2,18 +2,17 @@
 
 import colorsys
 from dataclasses import dataclass
-from typing import List, Optional, Type, Union, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
+import cv2 as cv
 import matplotlib as mpl
 import matplotlib.colors as mplc
 import matplotlib.figure as mplfigure
 import numpy as np
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from PIL import Image
-import cv2 as cv
-
 from fsl.structures import Instances
 from fsl.utils import colormap
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+from PIL import Image
 
 _Image = Type[Image.Image]
 
@@ -89,12 +88,13 @@ class VisImage:
 
 @dataclass
 class Visualizer(object):
+    image: Union[np.ndarray, _Image]
     scale: Optional[float] = 1.0
     font_scale: Optional[float] = 1.0
     area_thresh: Optional[int] = 1000
 
-    def __call__(self, image: Union[np.ndarray, _Image], instances: Instances) -> np.ndarray:
-        image = np.asarray(image)
+    def __post_init__(self):
+        image = np.asarray(self.image)
         image = image * 255 if image.dtype == np.float32 else image
         image = image.clip(0, 255).astype(np.uint8)
 
@@ -103,11 +103,10 @@ class Visualizer(object):
             max(np.sqrt(self.output.height * self.output.width) // 90, 10 // self.scale) * self.font_scale
         )
 
-        return self.overlay(image, instances)
+    def __call__(self, instances: Instances, alpha: Optional[float] = 0.5, **kwargs: Dict[str, Any]) -> np.ndarray:
+        return self.overlay(instances, alpha=alpha)
 
-    def overlay(
-        self, image: np.ndarray, instances: Instances, colors: List[List[int]] = None, alpha: Optional[float] = 0.5
-    ):
+    def overlay(self, instances: Instances, colors: List[List[int]] = None, alpha: Optional[float] = 0.5):
         colors = colors or [colormap.random_color(rgb=True, maximum=1) for _ in range(len(instances))]
         instances = instances.convert_bbox_fmt('xywh').numpy()  # .sort_by_area()
 
@@ -121,14 +120,13 @@ class Visualizer(object):
             if instances.masks is not None:
                 mask = instances.masks[i].astype(np.uint8) * 255
                 contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
-                segment = contours[0].squeeze()
-                # segment = np.column_stack(np.where(instances.masks[i])[::-1])
-                
-                self.draw_polygon(segment, color)
+                index = np.argmax([cv.contourArea(contour) for contour in contours])
+                segment = contours[index].squeeze()
+                self.draw_polygon(segment, color, alpha=alpha)
                 text_pos = [*np.min(segment, axis=0).tolist(), *np.max(segment, axis=0).tolist()]
                 h_align = 'center'
 
-            if instances.labels:
+            if len(instances.labels):
                 area = text_pos[2] * text_pos[3]
                 if area < self.area_thresh * self.output.scale or text_pos[-1] < 40 * self.output.scale:
                     if text_pos[-1] + text_pos[1] >= self.output.height - 5:
@@ -152,11 +150,7 @@ class Visualizer(object):
         return self.output
 
     def draw_box(
-        self,
-        box_coord: np.ndarray,
-        alpha: float = 0.5,
-        edge_color: str = 'g',
-        line_style: str = '-'
+        self, box_coord: np.ndarray, alpha: float = 0.5, edge_color: str = 'g', line_style: str = '-'
     ) -> VisImage:
         x, y, width, height = box_coord.astype(np.intp)
         linewidth = max(self._default_font_size / 4, 1)
@@ -175,17 +169,16 @@ class Visualizer(object):
         return self.output
 
     def draw_polygon(
-        self,
-        segment: np.ndarray,
-        color: Tuple[float, ...],
-        edge_color: Tuple[float, ...] = None,
-        alpha: float = 0.5
+        self, segment: np.ndarray, color: Tuple[float, ...], edge_color: Tuple[float, ...] = None, alpha: float = 0.5
     ) -> VisImage:
+        if len(segment) == 0:
+            return self.output
+
         if edge_color is None:
             # make edge color darker than the polygon color
             edge_color = self._change_color_brightness(color, brightness_factor=-0.7) if alpha > 0.8 else color
         edge_color = mplc.to_rgb(edge_color) + (1,)
-        
+
         polygon = mpl.patches.Polygon(
             segment,
             fill=True,
@@ -308,8 +301,8 @@ if __name__ == '__main__':
     )
     image = image.resize((instances.image_width, instances.image_height))
 
-    v = Visualizer()
-    x = v(image, instances)
+    v = Visualizer(image)
+    x = v(instances)
 
     import matplotlib.pyplot as plt
 
