@@ -315,43 +315,6 @@ def build_cie_fsod(
     )
 
 
-@model_registry('dinov2_fsod')
-def build_dinov2_fsod(
-    model_name: str = 'dinov2_vitb14',
-    roi_pool_size: int = 16,
-    prototype_file: str = None,
-    background_prototype_file: str = None,
-    label_map_file: str = None,
-) -> FSOD:
-    class DinoV2Patch(nn.Module):
-        def __init__(self, backbone):
-            super(DinoV2Patch, self).__init__()
-            self.backbone = backbone.eval()
-
-        @torch.no_grad()
-        def forward(self, image: _Tensor) -> _Tensor:
-            image = image.to(self.backbone.patch_embed.proj.weight.dtype)
-            outputs = self.backbone.get_intermediate_layers(image, n=[self.backbone.n_blocks - 1], reshape=True)
-            return outputs[0].float()
-
-        @property
-        def downsize(self) -> int:
-            return self.backbone.patch_size
-
-        @property
-        def device(self) -> torch.device:
-            return self.backbone.patch_embed.proj.weight.device
-
-    backbone = torch.hub.load('facebookresearch/dinov2', model_name)
-
-    for param in backbone.parameters():
-        param.requires_grad = False
-
-    backbone = backbone.to(torch.float16)
-
-    return _build_fsod(DinoV2Patch(backbone), roi_pool_size, prototype_file, background_prototype_file, label_map_file)
-
-
 class DinoV2Patch(nn.Module):
     def __init__(self, backbone):
         super(DinoV2Patch, self).__init__()
@@ -378,9 +341,25 @@ class DinoV2Patch(nn.Module):
         return self.backbone.patch_embed.proj.weight.dtype
 
     @classmethod
-    def build(cls, model_name: str):
+    def build(cls, model_name: str = 'dinov2_vitb14', frozen: bool = True):
         backbone = torch.hub.load('facebookresearch/dinov2', model_name)
+        if frozen:
+            for param in backbone.parameters():
+                param.requires_grad_(False)
         return cls(backbone)
+
+
+@model_registry('dinov2_fsod')
+def build_dinov2_fsod(
+    model_name: str = 'dinov2_vitb14',
+    roi_pool_size: int = 16,
+    prototype_file: str = None,
+    background_prototype_file: str = None,
+    label_map_file: str = None,
+) -> FSOD:
+    backbone = DinoV2Patch.build(model_name, frozen=True)
+    backbone = backbone.to(torch.float16)
+    return _build_fsod(backbone, roi_pool_size, prototype_file, background_prototype_file, label_map_file)
 
 
 @model_registry
@@ -392,13 +371,9 @@ def devit_dinov2_fsod(
     label_map_file: str = None,
     rpn_args: Dict[str, Any] = None,
 ) -> FSOD:
-    backbone = torch.hub.load('facebookresearch/dinov2', model_name)
-
-    for param in backbone.parameters():
-        param.requires_grad = False
-
+    backbone = DinoV2Patch.build(model_name, frozen=True).to(torch.float16)
     model = _build_fsod(
-        DinoV2Patch.build(model_name).to(torch.float16),  # (backbone.to(torch.float16)),
+        backbone,
         roi_pool_size,
         prototype_file,
         background_prototype_file,
