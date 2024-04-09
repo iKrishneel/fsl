@@ -370,7 +370,7 @@ def devit_dinov2_fsod(
     background_prototype_file: str = None,
     label_map_file: str = None,
     rpn_args: Dict[str, Any] = None,
-) -> FSOD:
+) -> Union[FSOD, MaskFSOD]:
     backbone = DinoV2Patch.build(model_name, frozen=True).to(torch.float16)
     model = _build_fsod(
         backbone,
