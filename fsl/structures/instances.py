@@ -36,14 +36,14 @@ class Instances(object):
     bbox_fmt: Union[BoundingBoxFormat, str] = BoundingBoxFormat.XYWH
     image_id: str = ""
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if isinstance(self.bbox_fmt, str):
             self.bbox_fmt = getattr(BoundingBoxFormat, self.bbox_fmt.upper())
 
         size = max(len(self.bboxes), len(self.masks) if self.masks is not None else 0, len(self.class_ids))
         if len(self.bboxes) > 0:
             assert len(self.bboxes) == size, f'Incorect size {len(self.bboxes)} != {size}'
-            setattr(self, 'sort_by_area', self.__sort_by_area)
+            setattr(self, 'sort_by_area', self._sort_by_area)
         if len(self.class_ids) > 0:
             assert len(self.class_ids) == size, f'Incorect size {len(self.class_ids)} != {size}'
         if self.labels:
@@ -116,7 +116,9 @@ class Instances(object):
         instance.image_height, instance.image_width = new_hw
         return instance
 
-    def __sort_by_area(self) -> 'Instances':
+    def _sort_by_area(self) -> 'Instances':
+        if len(self.bboxes) == 0:
+            return self
         instance = self.convert_bbox_fmt('xywh') if self.bbox_fmt.value != 'XYWH' else deepcopy(self)
         instance = instance.numpy()
         areas = np.prod(instance.bboxes[:, 2:], axis=1)
