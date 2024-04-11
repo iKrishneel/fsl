@@ -1,0 +1,76 @@
+device: "cuda"
+
+workdir:
+  path: "/tmp/fsl/devit_dinov2_fsod/"
+  unique: False
+
+distributed:
+  nproc_per_node: 4
+
+models:
+  devit_dinov2_text_fsod:
+    model_name: "dinov2_vitb14"
+    roi_pool_size: 7
+    label_map_file: "../../data/coco/label_mapping.json"
+    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_dinov2_fsod/fg/fs_coco14_trainval_base_30shot_vitb14.pkl"
+    background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_dinov2_fsod/bg/background_prototypes_vitb14.pkl"
+
+datasets:
+  dataloader:
+    batch_size: 1
+    num_workers: 0
+    collate_fn: "collate_data_instances"
+  coco:
+    train:
+      bucket_name: &bucket "sr-shokunin"
+      root: "perception/datasets/coco/train2017"
+      anno_fn: "/root/krishneel/Downloads/fsl/fs_coco17_base_train.json"
+    val:
+      bucket_name: *bucket
+      root: "perception/datasets/coco/val2017"
+      anno_fn: "/root/krishneel/Downloads/fsl/fs_coco17_base_val.json"
+
+transforms:
+  dinov2_trans:
+    engine: "torchvision.transforms"
+    ConvertFormatBoundingBox:
+      old_fmt: "XYWH"
+      new_fmt: "XYXY"
+    ResizeLongestSide:
+      size: 1024
+    PadToSize:
+      size: 1024
+    ResizeToDivisible:
+     factor: 14
+    # Resize:
+    #   size:
+    #     - 896
+    #     - 896
+    Normalize:
+      mean: [0.48145466, 0.4578275, 0.40821073]
+      std: [0.26862954, 0.26130258, 0.27577711]
+
+io:
+  checkpoint:
+    root: "perception/models/fsl/devit_dinov2_fsod/"
+
+build:
+  mode: "train"
+  devit_dinov2_text_fsod:
+    dataset: "coco"
+    # weights: "/root/krishneel/Downloads/fsl/weights/devit_dinov2_fsod_vitb14.pth"
+    transforms: "dinov2_trans"
+    train:
+      solver: "SGD"
+      scheduler: "StepLR"
+      epochs: 10
+    val:
+      func: "default_val_forward"
+    inference:
+      engine: "inference"
+
+  model: "devit_dinov2_text_fsod"
+
+options:
+  train: True
+  eval: False
