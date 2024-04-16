@@ -315,40 +315,6 @@ def build_cie_fsod(
     )
 
 
-class DinoV2Patch(nn.Module):
-    def __init__(self, backbone):
-        super(DinoV2Patch, self).__init__()
-        self.backbone = backbone
-        self.backbone.eval()
-
-    @torch.no_grad()
-    def forward(self, image: _Tensor) -> _Tensor:
-        im_dtype = image.dtype
-        image = image.to(self.device).to(self.dtype)
-        outputs = self.backbone.get_intermediate_layers(image, n=[self.backbone.n_blocks - 1], reshape=True)
-        return outputs[0].to(im_dtype) if self.training else outputs[0]
-
-    @property
-    def downsize(self) -> int:
-        return self.backbone.patch_size
-
-    @property
-    def device(self):
-        return self.backbone.patch_embed.proj.weight.device
-
-    @property
-    def dtype(self):
-        return self.backbone.patch_embed.proj.weight.dtype
-
-    @classmethod
-    def build(cls, model_name: str = 'dinov2_vitb14', frozen: bool = True):
-        backbone = torch.hub.load('facebookresearch/dinov2', model_name)
-        if frozen:
-            for param in backbone.parameters():
-                param.requires_grad_(False)
-        return cls(backbone)
-
-
 @model_registry('dinov2_fsod')
 def build_dinov2_fsod(
     model_name: str = 'dinov2_vitb14',
@@ -357,6 +323,8 @@ def build_dinov2_fsod(
     background_prototype_file: str = None,
     label_map_file: str = None,
 ) -> FSOD:
+    from ..backbone import DinoV2Backbone as DinoV2Patch
+
     backbone = DinoV2Patch.build(model_name, frozen=True)
     backbone = backbone.to(torch.float16)
     return _build_fsod(backbone, roi_pool_size, prototype_file, background_prototype_file, label_map_file)
@@ -371,14 +339,7 @@ def devit_dinov2_fsod(
     label_map_file: str = None,
     rpn_args: Dict[str, Any] = None,
 ) -> Union[FSOD, MaskFSOD]:
-    backbone = DinoV2Patch.build(model_name, frozen=True).to(torch.float16)
-    model = _build_fsod(
-        backbone,
-        roi_pool_size,
-        prototype_file,
-        background_prototype_file,
-        label_map_file,
-    )
+    model = build_dinov2_fsod(model_name, roi_pool_size, prototype_file, background_prototype_file, label_map_file)
 
     if rpn_args is not None:
         rpn_args = dict(rpn_args)
