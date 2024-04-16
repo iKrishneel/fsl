@@ -4,11 +4,10 @@ from typing import Any, Dict, List, Type, Union
 
 import torch
 import torch.nn as nn
-from igniter.registry import model_registry
-from torchvision.ops import RoIAlign
-
 from fsl.structures import Instances
 from fsl.utils import ProtoTypes
+from igniter.registry import model_registry
+from torchvision.ops import RoIAlign
 
 from .fsod import FSOD, MaskFSOD
 
@@ -41,7 +40,7 @@ class TextFSOD(FSOD):
         gt_instances = [target['gt_proposal'] for target in targets]
         gt_bboxes = [gt_proposal.to_tensor().bboxes.to(self.device) for gt_proposal in gt_instances]
         class_labels = torch.cat([instance.class_ids for instance in gt_instances])
-        class_labels[class_labels == -1] = self.classifier.train_class_weight.shape[0]        
+        class_labels[class_labels == -1] = self.classifier.train_class_weight.shape[0]
 
         # text_embeddings = [self.text_encoder.get_text_embedding(names) for names in gt_names]
 
@@ -91,15 +90,14 @@ def devit_dinov2_text_fsod(
     roi_pool_size: int = 7,
     prototype_file: str = None,
     background_prototype_file: str = None,
-    label_map_file:str = None,
-    rpn_args: Dict[str, Any] = {}
+    label_map_file: str = None,
+    rpn_args: Dict[str, Any] = {},
 ) -> Union[TextFSOD, TextMaskFSOD]:
-    from .fsod import devit_dinov2_fsod
     from fsl.models.clip_utils import build_clip
-        
-    _m = devit_dinov2_fsod(
-        model_name, roi_pool_size, prototype_file, background_prototype_file, label_map_file
-    )
+
+    from .fsod import devit_dinov2_fsod
+
+    _m = devit_dinov2_fsod(model_name, roi_pool_size, prototype_file, background_prototype_file, label_map_file)
 
     clip_model = build_clip(clip_model, remove_keys=['visual'])
 

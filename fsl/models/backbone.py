@@ -1,4 +1,4 @@
-#/usr/bin/env python
+# /usr/bin/env python
 
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Type
@@ -6,7 +6,6 @@ from typing import Any, Dict, Type
 import torch
 import torch.nn as nn
 from igniter.registry import model_registry
-
 
 _Tensor = Type[torch.Tensor]
 _Module = Type[nn.Module]

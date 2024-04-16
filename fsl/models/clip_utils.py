@@ -7,10 +7,9 @@ import cv2 as cv
 import numpy as np
 import torch
 import torch.nn as nn
+from fsl.models.sam_utils import SamAutomaticMaskGenerator
 from PIL import Image
 from torchvision.transforms import Compose
-
-from fsl.models.sam_utils import SamAutomaticMaskGenerator
 
 _Tensor = Type[torch.Tensor]
 _Image = Type[Image.Image]

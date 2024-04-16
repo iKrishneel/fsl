@@ -5,11 +5,10 @@ from typing import Any, Dict, List, Tuple, Type, Union
 
 import torch
 import torch.nn as nn
-from igniter.registry import model_registry
-from torchvision.ops import RoIAlign
-
 from fsl.structures import Instances
 from fsl.utils.prototypes import ProtoTypes
+from igniter.registry import model_registry
+from torchvision.ops import RoIAlign
 
 _Tensor = Type[torch.Tensor]
 
@@ -174,29 +173,6 @@ def _build_mask_fsod(
     roi_pooler: RoIAlign,
 ) -> MaskFSOD:
     return MaskFSOD(mask_generator, backbone=backbone, classifier=classifier, roi_pooler=roi_pooler)
-
-
-"""
-@model_registry('sam_fsod')
-def build_sam_fsod(
-    sam_args: Dict[str, str],
-    mask_gen_args: Dict[str, Any] = {},
-    roi_pool_size: int = 16,
-    prototype_file: str = None,
-    background_prototype_file: str = None,
-    label_map_file: str = None,
-) -> FSOD:
-    from fsl.models.sam_utils import build_sam_auto_mask_generator
-
-    backbone = build_sam_auto_mask_generator(sam_args, mask_gen_args)
-    return _build_fsod(
-        backbone,
-        roi_pool_size,
-        prototype_file,
-        background_prototype_file,
-        label_map_file,
-    )
-"""
 
 
 @model_registry('resnet_fsod')
