@@ -36,7 +36,19 @@ class FSOD(nn.Module):
 
         gt_instances = [target['gt_proposal'] for target in targets]
         gt_bboxes = [gt_proposal.to_tensor().bboxes.to(self.device) for gt_proposal in gt_instances]
-        class_labels = torch.cat([instance.class_ids for instance in gt_instances])
+
+        class_labels = [cid for instance in gt_instances for cid in instance.class_ids]
+        names = [label for gt_instance in gt_instances for label in gt_instance.labels]
+
+        for i, name in enumerate(names):
+            if name not in self.classifier._all_cids:
+                continue
+            class_labels[i] = self.classifier._all_cids.index(name)
+
+        class_labels = torch.IntTensor(class_labels)
+        # [self.classifier.index(name) for name in names]
+        
+        # class_labels = torch.cat(class_labels)
         class_labels[class_labels == -1] = self.classifier.train_class_weight.shape[0]
 
         im_embeddings = self.backbone(images)
