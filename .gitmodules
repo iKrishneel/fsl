@@ -1,0 +1,3 @@
+[submodule "fsl/third_party/dab_detr"]
+	path = fsl/third_party/dab_detr
+	url = https://github.com/IDEA-Research/DAB-DETR.git
