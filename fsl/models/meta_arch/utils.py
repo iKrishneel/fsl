@@ -19,7 +19,7 @@ class SineCosinePositionalEncoding(nn.Module):
         self.register_buffer('pe', pe.unsqueeze(0))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.pe[:, :x.size(1)]
+        x = x + self.pe[:, : x.size(1)]
         return self.dropout(x)
 
     @property
@@ -47,9 +47,7 @@ class VisualPromptEncoder(nn.Module):
 
 
 def build_position_encoder(encoder_type: str, embed_dim: int, **kwargs: Dict[str, Any]) -> nn.Module:
-    enc_cls_lut = {
-        'sine_cosine': SineCosinePositionalEncoding
-    }
+    enc_cls_lut = {'sine_cosine': SineCosinePositionalEncoding}
     assert encoder_type in enc_cls_lut, f'{encoder_type} not in {enc_cls_lut.keys()}'
     return enc_cls_lut[encoder_type](embed_dim, **kwargs)
 
