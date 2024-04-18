@@ -26,7 +26,7 @@ def file_writer(io_cfg: Dict[str, str], cfg: DictConfig) -> Callable:
     def write(prototypes: ProtoTypes, iid: str, model_name: str, prefix: str = '') -> None:
         write_path = os.path.join(root, model_name, dataset_name, folder_name)
         os.makedirs(write_path, exist_ok=True)
-        write_path = os.path.join(write_path, f'{prefix}{str(iid).zfill(12)}.pkl')
+        write_path = os.path.join(write_path, f'{prefix}{str(iid)}.pkl')
         prototypes.save(write_path)
 
     return write
@@ -46,9 +46,6 @@ def prototype_forward(engine, batch) -> None:
 
         features = engine._model.backbone(image[None])
         masks = bboxes2mask(instances.bboxes, image.shape[1:])
-
-        if masks.shape[0] == 0:
-            breakpoint()
 
         masks = torch.nn.functional.interpolate(masks[None], features.shape[2:], mode='nearest')[0]
         masks = masks.to(torch.bool).to(features.device)
@@ -181,7 +178,7 @@ def _post_process_prototypes(
         assert cluster_size > 0
         embeddings = compress(prototypes.embeddings, cluster_size)
         ProtoTypes(embeddings, labels=['background'] * embeddings.shape[0]).save(filename)
-    elif reduction.lower() == 'none':
+    elif reduction is None or reduction.lower() == 'none':
         prototypes.save(filename)
     else:
         raise TypeError(f'Unknown reduction type: {reduction}')
