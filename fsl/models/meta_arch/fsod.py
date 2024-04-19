@@ -5,10 +5,11 @@ from typing import Any, Dict, List, Tuple, Type, Union
 
 import torch
 import torch.nn as nn
-from fsl.structures import Instances
-from fsl.utils.prototypes import ProtoTypes
 from igniter.registry import model_registry
 from torchvision.ops import RoIAlign
+
+from fsl.structures import Instances
+from fsl.utils.prototypes import ProtoTypes
 
 _Tensor = Type[torch.Tensor]
 
@@ -46,7 +47,7 @@ class FSOD(nn.Module):
 
         class_labels = torch.IntTensor(class_labels)
         # [self.classifier.index(name) for name in names]
-        
+
         # class_labels = torch.cat(class_labels)
         class_labels[class_labels == -1] = self.classifier.train_class_weight.shape[0]
 

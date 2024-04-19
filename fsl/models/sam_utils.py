@@ -5,13 +5,14 @@ from typing import Any, Dict, List, Type, Union
 import numpy as np
 import torch
 import torch.nn as nn
-from fsl.models import utils
-from fsl.structures import Instances
 from PIL import Image
 from segment_anything import SamAutomaticMaskGenerator as _SAMG
 from segment_anything import SamPredictor as _SamPredictor
 from segment_anything import sam_model_registry
 from torchvision.datapoints import BoundingBoxFormat
+
+from fsl.models import utils
+from fsl.structures import Instances
 
 _Tensor = Type[torch.Tensor]
 _Module = Type[nn.Module]

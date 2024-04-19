@@ -9,10 +9,11 @@ import matplotlib as mpl
 import matplotlib.colors as mplc
 import matplotlib.figure as mplfigure
 import numpy as np
-from fsl.structures import Instances
-from fsl.utils import colormap
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from PIL import Image
+
+from fsl.structures import Instances
+from fsl.utils import colormap
 
 _Image = Type[Image.Image]
 

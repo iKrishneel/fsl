@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Tuple, Type, Union
 
 import numpy as np
 import torch
@@ -19,14 +19,19 @@ from fsl.datasets.utils import prepare_noisy_boxes
 from fsl.utils import version
 from fsl.utils.matcher import Matcher
 
-if version.minor_version(torchvision.__version__) <= 15:
+
+def tv_version_lte(ver: int = 15):
+    return version.minor_version(torchvision.__version__) <= ver
+
+
+if tv_version_lte(15):
     from torchvision.datapoints import BoundingBoxFormat
 else:
     from torchvision.tv_tensors import BoundingBoxFormat
 
 
-_Tensor = torch.Tensor
-_Image = Image.Image
+_Tensor = Type[torch.Tensor]
+_Image = Type[Image.Image]
 
 
 @transform_registry
@@ -47,7 +52,8 @@ class ResizeLongestSide(object):
             )
 
         if bboxes is not None:
-            bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=target_size)[0] for bbox in bboxes]
+            func = TF.resize_bounding_box if tv_version_lte(15) else TF.resize_bounding_boxes
+            bboxes = [func(bbox, img_hw, size=target_size)[0] for bbox in bboxes]
             data['bboxes'] = bboxes
 
         data['image'] = image
@@ -102,7 +108,8 @@ class Resize(object):
             )
 
         if bboxes is not None:
-            bboxes = [TF.resize_bounding_box(bbox, spatial_size=img_hw, size=image.shape[1:])[0] for bbox in bboxes]
+            func = TF.resize_bounding_box if tv_version_lte(15) else TF.resize_bounding_boxes
+            bboxes = [func(bbox, img_hw, size=image.shape[1:])[0] for bbox in bboxes]
             data['bboxes'] = bboxes
 
         data['image'] = image
@@ -127,7 +134,8 @@ class PadToSize(object):
             data['masks'] = TF.pad_image_tensor(data['masks'], padding)
 
         if bboxes is not None:
-            bboxes = [TF.pad_bounding_box(bbox, self.bbox_fmt, img_hw, padding)[0] for bbox in bboxes]
+            func = TF.pad_bounding_box if tv_version_lte(15) else TF.pad_bounding_boxes
+            bboxes = [func(bbox, self.bbox_fmt, img_hw, padding)[0] for bbox in bboxes]
             data['bboxes'] = bboxes
 
         data['image'] = image
@@ -206,7 +214,8 @@ class Normalize(object):
 
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
         image = [data.get(key) for key in ['image']][0]
-        image = TF.to_image_tensor(image).float() / 255.0
+        func = TF.to_image_tensor if tv_version_lte(15) else TF.to_image
+        image = TF.to_image(image).float() / 255.0
         image = TF.normalize(image, self.mean, self.std)
         data['image'] = image
         return data

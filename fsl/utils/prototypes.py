@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, List, Type, Union
 
 import numpy as np
 import torch
+
 from fsl.structures import Instances
 
 _Tensor = Type[torch.Tensor]
