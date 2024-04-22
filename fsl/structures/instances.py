@@ -67,7 +67,10 @@ class Instances(object):
         instances = deepcopy(self)
         for i, bbox in enumerate(instances.bboxes):
             bbox = torch.as_tensor(bbox) if not isinstance(bbox, torch.Tensor) else bbox
-            bbox = functional.convert_format_bounding_box(bbox, instances.bbox_fmt, bbox_fmt)
+            try:
+                bbox = functional.convert_format_bounding_box(bbox, instances.bbox_fmt, bbox_fmt)
+            except AttributeError:
+                bbox = functional.convert_bounding_box_format(bbox, instances.bbox_fmt, bbox_fmt)
             instances.bboxes[i] = bbox if isinstance(instances.bboxes[i], torch.Tensor) else bbox.cpu().numpy()
         instances.bbox_fmt = bbox_fmt
         return instances
@@ -104,9 +107,14 @@ class Instances(object):
 
         instance = self.to_tensor()
         if len(instance.bboxes):
-            instance.bboxes = functional.resize_bounding_box(
-                instance.bboxes, size=new_hw, spatial_size=(self.image_height, self.image_width)
-            )[0]
+            try:
+                instance.bboxes = functional.resize_bounding_box(
+                    instance.bboxes, size=new_hw, spatial_size=(self.image_height, self.image_width)
+                )[0]
+            except AttributeError:
+                instance.bboxes = functional.resize_bounding_boxes(
+                    instance.bboxes, size=new_hw, canvas_size=(self.image_height, self.image_width)
+                )[0]
 
         if instance.masks is not None:
             instance.masks = functional.resize(

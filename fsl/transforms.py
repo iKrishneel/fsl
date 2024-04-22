@@ -128,10 +128,12 @@ class PadToSize(object):
 
         # LRTB --> LTRB
         padding = (0, 0, self.size - img_hw[1], self.size - img_hw[0])
-        image = TF.pad_image_tensor(image, padding)
+
+        func = TF.pad_image_tensor if tv_version_lte(15) else TF.pad_image
+        image = func(image, padding)
 
         if 'masks' in data:
-            data['masks'] = TF.pad_image_tensor(data['masks'], padding)
+            data['masks'] = func(data['masks'], padding)
 
         if bboxes is not None:
             func = TF.pad_bounding_box if tv_version_lte(15) else TF.pad_bounding_boxes
@@ -245,6 +247,8 @@ class RandomResizeCrop(transforms.RandomResizedCrop):
 
         image = data['image']
 
+        func_bb = TF.resized_crop_bounding_box if tv_version_lte(15) else TF.resized_crop_bounding_boxes
+
         i, j, h, w = self.get_params(image, self.scale, self.ratio)
         data['image'] = TF.resized_crop(image, i, j, h, w, self.size, self.interpolation, antialias=self.antialias)
 
@@ -256,7 +260,7 @@ class RandomResizeCrop(transforms.RandomResizedCrop):
         if 'bboxes' in data:
             bboxes = data['bboxes']
             bboxes = torch.stack(bboxes) if isinstance(bboxes, list) else bboxes
-            nbboxes, _ = TF.resized_crop_bounding_box(bboxes, BoundingBoxFormat.XYXY, i, j, h, w, self.size)
+            nbboxes, _ = func_bb(bboxes, BoundingBoxFormat.XYXY, i, j, h, w, self.size)
 
             diff = nbboxes[:, 2:] - nbboxes[:, :2]
             flags = torch.prod(diff > self.min_size, dim=1).bool()

@@ -11,9 +11,12 @@ from fsl.utils import version
 
 if version.minor_version(torchvision.__version__) <= 15:
     from torchvision.datapoints import BoundingBoxFormat as BBFmt
+
+    convert_bounding_box_format = functional.convert_format_bounding_box
 else:
     from torchvision.tv_tensors import BoundingBoxFormat as BBFmt
 
+    convert_bounding_box_format = functional.convert_bounding_box_format
 
 _Tensor = Type[torch.Tensor]
 
@@ -34,7 +37,7 @@ def prepare_noisy_boxes(
 
     for box in gt_boxes:
         box = box.repeat(n, 1)
-        box_ccwh = functional.convert_format_bounding_box(box, bb_fmt, BBFmt.CXCYWH)
+        box_ccwh = convert_bounding_box_format(box, bb_fmt, BBFmt.CXCYWH)
 
         diff = torch.zeros_like(box_ccwh)
         if random_center:
@@ -45,7 +48,7 @@ def prepare_noisy_boxes(
         rand_part = torch.rand_like(box_ccwh) * rand_sign
         box_ccwh = box_ccwh + torch.mul(rand_part, diff) * box_noise_scale
 
-        noisy_box = functional.convert_format_bounding_box(box_ccwh, BBFmt.CXCYWH, bb_fmt)
+        noisy_box = convert_bounding_box_format(box_ccwh, BBFmt.CXCYWH, bb_fmt)
 
         noisy_box[:, 0].clamp_(min=0.0, max=im_shape[1])
         noisy_box[:, 2].clamp_(min=0.0, max=im_shape[1])
