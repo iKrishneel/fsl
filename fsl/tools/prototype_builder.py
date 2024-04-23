@@ -2,7 +2,7 @@
 
 import os
 import pickle
-from typing import Any, Callable, Dict, List, Type
+from typing import Any, Callable, Dict, List, Type, Union
 
 import torch
 from igniter.engine import EvaluationEngine
@@ -33,7 +33,8 @@ def file_writer(io_cfg: Dict[str, str], cfg: DictConfig) -> Callable:
 
 
 @func_registry
-def prototype_forward(engine, batch) -> None:
+def prototype_forward(engine, batch, save: bool = True) -> Union[None, ProtoTypes]:
+    all_prototypes = None
     for image, instances in zip(*batch):
 
         def bboxes2mask(bboxes: torch.Tensor, img_hw: List[int]) -> torch.Tensor:
@@ -60,8 +61,12 @@ def prototype_forward(engine, batch) -> None:
 
         prototypes = ProtoTypes(tokens.float(), labels=labels)
         # prototypes = engine._model.build_image_prototypes(image, instances)
-        engine.file_io(prototypes, instances.image_id, engine._cfg.build.model)
+        if save:
+            engine.file_io(prototypes, instances.image_id, engine._cfg.build.model)
+        else:
+            all_prototypes = prototypes if all_prototypes is None else all_prototypes + prototypes
 
+    return all_prototypes
 
 @func_registry
 def bg_prototype_forward(engine, batch) -> None:

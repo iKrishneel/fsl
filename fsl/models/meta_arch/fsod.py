@@ -93,14 +93,24 @@ class FSOD(nn.Module):
             )
             new_state_dict[new_key] = state_dict[key]
 
-        has_bg1 = any(['bg_' in key for key in self.classifier.state_dict()])
+        has_bg1 = any(
+            [
+                'bg_' in key and isinstance(getattr(self.classifier, key), torch.Tensor)
+                for key in self.classifier.state_dict()
+            ]
+        )
         has_bg2 = any(['classifier.bg_' in key for key in state_dict])
-
+        
         for key in state_dict:
             name = key.replace('classifier.', '')
             if '_class_weight' in key or 'bg_tokens' in key:
                 if hasattr(self.classifier, name):
-                    delattr(self.classifier, name)
+                    if isinstance(getattr(self.classifier, name), torch.Tensor):
+                        new_state_dict[key] = getattr(self.classifier, name)
+                        # delattr(self.classifier, name)
+                    else:
+                        delattr(self.classifier, name)
+                        
                 self.classifier.register_buffer(name, state_dict[key])
 
         if not has_bg1 and has_bg2:

@@ -135,6 +135,7 @@ class DeVit(nn.Module):
             self.register_buffer('train_class_weight', pt.normalized_embedding[torch.as_tensor(train_class_order)])
             self.register_buffer('test_class_weight', pt.normalized_embedding[torch.as_tensor(test_class_order)])
 
+
     def _init_bg_layers(self) -> None:
         self.bg_cls_weight = 0.2
         self.fc_bg_class = nn.Linear(self.t_len, self.temb)
