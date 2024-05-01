@@ -50,10 +50,6 @@ def prototype_forward(engine, batch, save: bool = True) -> Union[None, ProtoType
     with torch.inference_mode():
         features = engine._model.get_features(torch.stack(images))
 
-    if torch.any(torch.isnan(features)):
-        print([instance.image_id for instance in instances])
-        raise ValueError(f'NaN in features')
-
     for feature, image, instance in zip(features, images, instances):
         masks = bboxes2mask(instance.bboxes, image.shape[1:])
         masks = torch.nn.functional.interpolate(masks[None], feature.shape[1:], mode='nearest')[0]
@@ -64,8 +60,13 @@ def prototype_forward(engine, batch, save: bool = True) -> Union[None, ProtoType
         if len(labels) == 0:
             return
 
-        tokens = torch.stack([(feature * mask).flatten(1).sum(1) / mask.sum() for mask in masks if mask.sum() > 0])
-        prototypes = ProtoTypes(tokens.float(), labels=labels)
+        indices = [i for i, mask in enumerate(masks) if mask.sum() > 0]
+        tokens = torch.stack([(feature * masks[index]).flatten(1).sum(1) / masks[index].sum() for index in indices])
+
+        if torch.any(torch.isnan(tokens)) or torch.any(torch.isinf(tokens)):
+            raise ValueError(f'NaN/Inf in features for image_id: {instance.image_id}')
+
+        prototypes = ProtoTypes(tokens, labels=[labels[i] for i in indices])
         if save:
             engine.file_io(prototypes, instance.image_id, engine._cfg.build.model)
         else:
