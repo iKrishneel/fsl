@@ -64,7 +64,8 @@ def prototype_forward(engine, batch, save: bool = True) -> Union[None, ProtoType
         tokens = torch.stack([(feature * masks[index]).flatten(1).sum(1) / masks[index].sum() for index in indices])
 
         if torch.any(torch.isnan(tokens)) or torch.any(torch.isinf(tokens)):
-            raise ValueError(f'NaN/Inf in features for image_id: {instance.image_id}')
+            logger.warning(f'NaN/Inf in features for image_id: {instance.image_id}')
+            continue
 
         prototypes = ProtoTypes(tokens, labels=labels)
         if save:
