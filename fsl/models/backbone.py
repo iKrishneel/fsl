@@ -39,8 +39,8 @@ class DinoV2Backbone(BackboneWrapper):
         if feat_layers is not None:
             assert isinstance(feat_layers, (tuple, list, ListConfig)), f'Expects {list} but got {type(feat_layers)}'
 
-        n = len(backbone.blocks) - 1
-        feat_layers = [*feat_layers, n] if n not in feat_layers else feat_layers
+        # n = len(backbone.blocks) - 1
+        # feat_layers = [*feat_layers, n] if n not in feat_layers else feat_layers
         self.feat_layers = feat_layers or [self.backbone.n_blocks - 1]
 
     @torch.inference_mode()

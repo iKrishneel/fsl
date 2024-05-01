@@ -23,46 +23,48 @@ def file_writer(io_cfg: Dict[str, str], cfg: DictConfig) -> Callable:
     folder_name = io_cfg.folder_name
     dataset_name = cfg.build[cfg.build.model]['dataset']
 
-    def write(prototypes: ProtoTypes, iid: str, model_name: str, prefix: str = '') -> None:
+    def write(prototypes: ProtoTypes, iid: str, model_name: str, prefix: str = '') -> str:
         write_path = os.path.join(root, model_name, dataset_name, folder_name)
         os.makedirs(write_path, exist_ok=True)
         write_path = os.path.join(write_path, f'{prefix}{str(iid)}.pkl')
         prototypes.save(write_path)
+        return write_path
 
     return write
+
+
+def bboxes2mask(bboxes: torch.Tensor, img_hw: List[int]) -> torch.Tensor:
+    mask = torch.zeros(len(bboxes), *img_hw)
+    # boxes = torch.round(bboxes).long()
+    for i in range(len(bboxes)):
+        x1, y1, x2, y2 = torch.round(bboxes[i]).int()
+        mask[i, y1:y2, x1:x2] = 1
+    return mask.to(torch.uint8)
 
 
 @func_registry
 def prototype_forward(engine, batch, save: bool = True) -> Union[None, ProtoTypes]:
     all_prototypes = None
-    for image, instances in zip(*batch):
 
-        def bboxes2mask(bboxes: torch.Tensor, img_hw: List[int]) -> torch.Tensor:
-            mask = torch.zeros(len(bboxes), *img_hw)
-            # boxes = torch.round(bboxes).long()
-            for i in range(len(bboxes)):
-                x1, y1, x2, y2 = torch.round(bboxes[i]).int()
-                mask[i, y1:y2, x1:x2] = 1
-            return mask.to(torch.uint8)
+    images, instances = batch
+    with torch.inference_mode():
+        features = engine._model.get_features(torch.stack(images))
 
-        features = engine._model.get_features(image)
-        masks = bboxes2mask(instances.bboxes, image.shape[1:])
-
-        masks = torch.nn.functional.interpolate(masks[None], features.shape[2:], mode='nearest')[0]
+    for feature, image, instance in zip(features, images, instances):
+        masks = bboxes2mask(instance.bboxes, image.shape[1:])
+        masks = torch.nn.functional.interpolate(masks[None], feature.shape[1:], mode='nearest')[0]
         masks = masks.to(torch.bool).to(features.device)
 
-        features = features[0]
-        labels = [instances.labels[i] for i, mask in enumerate(masks) if mask.sum() > 0]
+        labels = [instance.labels[i] for i, mask in enumerate(masks) if mask.sum() > 0]
 
         if len(labels) == 0:
             return
 
-        tokens = torch.stack([(features * mask).flatten(1).sum(1) / mask.sum() for mask in masks if mask.sum() > 0])
-
+        tokens = torch.stack([(feature * mask).flatten(1).sum(1) / mask.sum() for mask in masks if mask.sum() > 0])
         prototypes = ProtoTypes(tokens.float(), labels=labels)
-        # prototypes = engine._model.build_image_prototypes(image, instances)
         if save:
-            engine.file_io(prototypes, instances.image_id, engine._cfg.build.model)
+            # engine.file_io(prototypes, instance.image_id, engine._cfg.build.model)
+            pass
         else:
             all_prototypes = prototypes if all_prototypes is None else all_prototypes + prototypes
 
@@ -72,18 +74,6 @@ def prototype_forward(engine, batch, save: bool = True) -> Union[None, ProtoType
 @func_registry
 def bg_prototype_forward(engine, batch) -> None:
     for image, instances in zip(*batch):
-        # image_ids = instances['image_ids']
-        # instances = Instances(
-        #     image_height=image.shape[-2],
-        #     image_width=image.shape[-1],
-        #     bboxes=instances['bboxes'],
-        #     class_ids=instances['category_ids'],
-        #     labels=instances['category_names'],
-        #     masks=instances.get('masks', None),
-        #     image_id=image_ids,
-        # )
-
-        # features = engine._model.backbone(image[None])
         features = engine._model.get_features(image)
 
         if instances.masks is not None:
