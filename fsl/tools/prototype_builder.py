@@ -63,8 +63,7 @@ def prototype_forward(engine, batch, save: bool = True) -> Union[None, ProtoType
         tokens = torch.stack([(feature * mask).flatten(1).sum(1) / mask.sum() for mask in masks if mask.sum() > 0])
         prototypes = ProtoTypes(tokens.float(), labels=labels)
         if save:
-            # engine.file_io(prototypes, instance.image_id, engine._cfg.build.model)
-            pass
+            engine.file_io(prototypes, instance.image_id, engine._cfg.build.model)
         else:
             all_prototypes = prototypes if all_prototypes is None else all_prototypes + prototypes
 
