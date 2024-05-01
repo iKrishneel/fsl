@@ -45,7 +45,7 @@ def prototype_forward(engine, batch, save: bool = True) -> Union[None, ProtoType
                 mask[i, y1:y2, x1:x2] = 1
             return mask.to(torch.uint8)
 
-        features = engine._model.backbone(image[None])
+        features = engine._model.get_features(image)
         masks = bboxes2mask(instances.bboxes, image.shape[1:])
 
         masks = torch.nn.functional.interpolate(masks[None], features.shape[2:], mode='nearest')[0]
@@ -68,6 +68,7 @@ def prototype_forward(engine, batch, save: bool = True) -> Union[None, ProtoType
 
     return all_prototypes
 
+
 @func_registry
 def bg_prototype_forward(engine, batch) -> None:
     for image, instances in zip(*batch):
@@ -82,7 +83,8 @@ def bg_prototype_forward(engine, batch) -> None:
         #     image_id=image_ids,
         # )
 
-        features = engine._model.backbone(image[None])
+        # features = engine._model.backbone(image[None])
+        features = engine._model.get_features(image)
 
         if instances.masks is not None:
             masks = instances.masks[None]

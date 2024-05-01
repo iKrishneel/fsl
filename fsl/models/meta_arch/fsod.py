@@ -51,7 +51,7 @@ class FSOD(nn.Module):
         # class_labels = torch.cat(class_labels)
         class_labels[class_labels == -1] = self.classifier.train_class_weight.shape[0]
 
-        im_embeddings = self.backbone(images)
+        im_embeddings = self.get_features(images)
 
         roi_features = self.forward_features(im_embeddings, gt_bboxes)
         loss_dict = self.classifier(roi_features, class_labels)
@@ -59,7 +59,7 @@ class FSOD(nn.Module):
 
     @torch.inference_mode()
     def inference(self, images: _Tensor, instances: Instances) -> Tuple[Dict[str, Any]]:
-        features = self.backbone(images)
+        features = self.get_features(images)
         instances = instances.convert_bbox_fmt('xyxy').to_tensor(self.device)
         bboxes = instances.bboxes
         rois = torch.cat([torch.full((len(bboxes), 1), fill_value=0).to(self.device), bboxes], dim=1)
@@ -69,13 +69,23 @@ class FSOD(nn.Module):
 
     @torch.no_grad()
     def build_image_prototypes(self, image: _Tensor, instances: Instances) -> ProtoTypes:
-        features = self.backbone(image[None].to(self.device))
+        # features = self.backbone(image[None].to(self.device))
+        features = self.get_features(image)
         instances = instances.to_tensor(self.device)
 
         roi_feats = self.forward_features(features, [instances.bboxes.to(features.dtype)])
         index = 2 if len(roi_feats.shape) == 4 else 1
         roi_feats = roi_feats.flatten(index).mean(index)
         return ProtoTypes(embeddings=roi_feats, labels=instances.labels, instances=instances)
+
+    def get_features(self, images: _Tensor) -> _Tensor:
+        images = images if len(images.shape) == 4 else images[None]
+        assert len(images.shape) == 4
+
+        features = self.backbone(images.to(self.device))
+        if isinstance(features, (list, tuple)):
+            features = torch.mean(torch.stack(features), dim=0)
+        return features
 
     @property
     def device(self) -> torch.device:
@@ -100,7 +110,7 @@ class FSOD(nn.Module):
             ]
         )
         has_bg2 = any(['classifier.bg_' in key for key in state_dict])
-        
+
         for key in state_dict:
             name = key.replace('classifier.', '')
             if '_class_weight' in key or 'bg_tokens' in key:
@@ -110,7 +120,7 @@ class FSOD(nn.Module):
                         # delattr(self.classifier, name)
                     else:
                         delattr(self.classifier, name)
-                        
+
                 self.classifier.register_buffer(name, state_dict[key])
 
         if not has_bg1 and has_bg2:
@@ -198,6 +208,64 @@ def _build_mask_fsod(
     return MaskFSOD(mask_generator, backbone=backbone, classifier=classifier, roi_pooler=roi_pooler)
 
 
+@model_registry('dinov2_fsod')
+def build_dinov2_fsod(
+    model_name: str = 'dinov2_vitb14',
+    roi_pool_size: int = 16,
+    feature_layers: List[int] = None,
+    prototype_file: str = None,
+    background_prototype_file: str = None,
+    label_map_file: str = None,
+) -> FSOD:
+    from ..backbone import DinoV2Backbone as DinoV2Patch
+
+    backbone = DinoV2Patch.build(model_name=model_name, frozen=True, feat_layers=feature_layers)
+    backbone = backbone.to(torch.float16)
+    return _build_fsod(backbone, roi_pool_size, prototype_file, background_prototype_file, label_map_file)
+
+
+@model_registry
+def devit_dinov2_fsod(
+    model_name: str = 'dinov2_vitb14',
+    roi_pool_size: int = 7,
+    feature_layers: List[int] = None,
+    prototype_file: str = None,
+    background_prototype_file: str = None,
+    label_map_file: str = None,
+    rpn_args: Dict[str, Any] = None,
+) -> Union[FSOD, MaskFSOD]:
+    model = build_dinov2_fsod(
+        model_name=model_name,
+        roi_pool_size=roi_pool_size,
+        feature_layers=feature_layers,
+        prototype_file=prototype_file,
+        background_prototype_file=background_prototype_file,
+        label_map_file=label_map_file,
+    )
+
+    if rpn_args is not None:
+        rpn_args = dict(rpn_args)
+        rpn_type = rpn_args.pop('type', 'sam').lower()
+
+        if rpn_type == 'sam':
+            build_func = importlib.import_module('fsl.models.sam_utils').build_sam_auto_mask_generator
+        elif rpn_type == 'fast_sam':
+            build_func = importlib.import_module('fsl.models.fast_sam_utils').build_fast_sam_mask_generator
+        else:
+            raise TypeError(f'Unknown type {rpn_type}')
+
+        mask_generator = build_func(**rpn_args)
+        model = _build_mask_fsod(
+            mask_generator,
+            model.backbone,
+            model.classifier,
+            model.roi_pooler,
+        )
+
+    return model
+
+
+"""
 @model_registry('resnet_fsod')
 def build_resnet_fsod(
     roi_pool_size: int = 16,
@@ -312,51 +380,4 @@ def build_cie_fsod(
         background_prototype_file,
         label_map_file,
     )
-
-
-@model_registry('dinov2_fsod')
-def build_dinov2_fsod(
-    model_name: str = 'dinov2_vitb14',
-    roi_pool_size: int = 16,
-    prototype_file: str = None,
-    background_prototype_file: str = None,
-    label_map_file: str = None,
-) -> FSOD:
-    from ..backbone import DinoV2Backbone as DinoV2Patch
-
-    backbone = DinoV2Patch.build(model_name, frozen=True)
-    backbone = backbone.to(torch.float16)
-    return _build_fsod(backbone, roi_pool_size, prototype_file, background_prototype_file, label_map_file)
-
-
-@model_registry
-def devit_dinov2_fsod(
-    model_name: str = 'dinov2_vitb14',
-    roi_pool_size: int = 7,
-    prototype_file: str = None,
-    background_prototype_file: str = None,
-    label_map_file: str = None,
-    rpn_args: Dict[str, Any] = None,
-) -> Union[FSOD, MaskFSOD]:
-    model = build_dinov2_fsod(model_name, roi_pool_size, prototype_file, background_prototype_file, label_map_file)
-
-    if rpn_args is not None:
-        rpn_args = dict(rpn_args)
-        rpn_type = rpn_args.pop('type', 'sam').lower()
-
-        if rpn_type == 'sam':
-            build_func = importlib.import_module('fsl.models.sam_utils').build_sam_auto_mask_generator
-        elif rpn_type == 'fast_sam':
-            build_func = importlib.import_module('fsl.models.fast_sam_utils').build_fast_sam_mask_generator
-        else:
-            raise TypeError(f'Unknown type {rpn_type}')
-
-        mask_generator = build_func(**rpn_args)
-        model = _build_mask_fsod(
-            mask_generator,
-            model.backbone,
-            model.classifier,
-            model.roi_pooler,
-        )
-
-    return model
+"""
