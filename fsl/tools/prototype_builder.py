@@ -50,6 +50,10 @@ def prototype_forward(engine, batch, save: bool = True) -> Union[None, ProtoType
     with torch.inference_mode():
         features = engine._model.get_features(torch.stack(images))
 
+    if torch.any(torch.isnan(features)):
+        print([instance.image_id for instance in instances])
+        raise ValueError(f'NaN in features')
+
     for feature, image, instance in zip(features, images, instances):
         masks = bboxes2mask(instance.bboxes, image.shape[1:])
         masks = torch.nn.functional.interpolate(masks[None], feature.shape[1:], mode='nearest')[0]
