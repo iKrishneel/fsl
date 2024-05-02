@@ -82,9 +82,13 @@ class FSOD(nn.Module):
         images = images if len(images.shape) == 4 else images[None]
         assert len(images.shape) == 4
 
-        features = self.backbone(images.to(self.device))
+        features = self.backbone(images.to(self.device), norm=False)
+        features = features[0] if len(features) == 1 else features
+
         if isinstance(features, (list, tuple)):
-            features = torch.mean(torch.stack(features), dim=0)
+            # TODO: fusion strategy
+            features = torch.add(torch.stack(features), dim=0)
+            # features = torch.cat(features, dim=1)
         return features
 
     @property

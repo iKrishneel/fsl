@@ -155,8 +155,8 @@ class VHFlip(object):
         image, bboxes = [data.get(key) for key in ['image', 'bboxes']]
         mask = data.get('masks', None)
 
-        hflipper = TF.horizontal_flip_image_tensor if isinstance(image, torch.Tensor) else TF.horizontal_flip_image_pil
-        vflipper = TF.vertical_flip_image_tensor if isinstance(image, torch.Tensor) else TF.vertical_flip_image_pil
+        hflipper = TF.horizontal_flip if isinstance(image, torch.Tensor) else TF.horizontal_flip_image_pil
+        vflipper = TF.vertical_flip if isinstance(image, torch.Tensor) else TF.vertical_flip_image_pil
 
         if self.hflip and np.random.choice([True, False]):
             image = hflipper(image)
@@ -164,14 +164,14 @@ class VHFlip(object):
 
             if bboxes is not None:
                 spatial_size = image.shape[1:]
-                bboxes = [TF.horizontal_flip_bounding_box(bbox, self.bbox_fmt, spatial_size) for bbox in bboxes]
+                bboxes = [TF.horizontal_flip_bounding_boxes(bbox, self.bbox_fmt, spatial_size) for bbox in bboxes]
 
         if self.vflip and np.random.choice([True, False]):
             image = vflipper(image)
             mask = vflipper(mask) if mask is not None else mask
             if bboxes is not None:
                 spatial_size = image.shape[1:]
-                bboxes = [TF.vertical_flip_bounding_box(bbox, self.bbox_fmt, spatial_size) for bbox in bboxes]
+                bboxes = [TF.vertical_flip_bounding_boxes(bbox, self.bbox_fmt, spatial_size) for bbox in bboxes]
 
         data['image'] = image
 

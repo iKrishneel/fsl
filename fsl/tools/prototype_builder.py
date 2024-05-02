@@ -50,12 +50,12 @@ def prototype_forward(engine, batch, save: bool = True) -> Union[None, ProtoType
     with torch.inference_mode():
         features = engine._model.get_features(torch.stack(images))
 
-    for feature, image, instance in zip(features, images, instances):
+    for feature, image, instance in zip(features.float(), images, instances):
         masks = bboxes2mask(instance.bboxes, image.shape[1:])
         masks = torch.nn.functional.interpolate(masks[None], feature.shape[1:], mode='nearest')[0]
         masks = masks.to(torch.bool).to(features.device)
 
-        indices = [i for i, mask in enumerate(masks) if mask.sum() > 0]        
+        indices = [i for i, mask in enumerate(masks) if mask.sum() > 0]
 
         if len(indices) == 0:
             return
@@ -91,13 +91,13 @@ def bg_prototype_forward(engine, batch) -> None:
 
         masks = torch.nn.functional.interpolate(masks, features.shape[2:], mode='nearest')[0]
         masks = masks.to(torch.bool)
-        features = features.squeeze(0).flatten(1).permute(1, 0)
+        features = features.float().squeeze(0).flatten(1).permute(1, 0)
 
         prototypes = None
         for i, mask in enumerate(masks):
             mask = mask.flatten()
             bg_tokens = features[mask]
-            if len(bg_tokens) == 0:
+            if len(bg_tokens) == 0 or torch.any(torch.isinf(bg_tokens)):
                 continue
             bg_tokens = compress(bg_tokens, n_clst=5)
             labels = [instances.labels[i]] * bg_tokens.shape[0]
