@@ -1,4 +1,5 @@
 device: "cuda"
+driver: "fsl.main"
 
 workdir:
   path: "/tmp/fsl/devit_dinov2_fsod/"
@@ -10,10 +11,14 @@ distributed:
 models:
   devit_dinov2_text_fsod:
     model_name: "dinov2_vitb14"
-    roi_pool_size: 7
+    roi_pool_size: 7    
+    clip:
+      model: ViT-B/32
+    rpn_args:
+      type: fast_sam        
     label_map_file: "../../data/coco/label_mapping.json"
-    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_dinov2_fsod/fg/fs_coco14_trainval_base_30shot_vitb14.pkl"
-    background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_dinov2_fsod/bg/background_prototypes_vitb14.pkl"
+    # prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_dinov2_fsod/fg/fs_coco14_trainval_base_30shot_vitb14.pkl"
+    # background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_dinov2_fsod/bg/background_prototypes_vitb14.pkl"
 
 datasets:
   dataloader:
@@ -67,7 +72,7 @@ build:
     val:
       func: "default_val_forward"
     inference:
-      engine: "inference"
+      engine: "fsl_inference_engine"
 
   model: "devit_dinov2_text_fsod"
 

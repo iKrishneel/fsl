@@ -80,8 +80,8 @@ class CLIP(nn.Module):
         return model, preprocessng
 
 
-def build_clip(model_name: str, remove_keys: List[str] = []) -> CLIP:
-    return CLIP(model_name, remove_keys)
+def build_clip(model: str, remove_keys: List[str] = []) -> CLIP:
+    return CLIP(model, remove_keys)
 
 
 class SamPlusCLIP(nn.Module):

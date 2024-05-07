@@ -9,10 +9,12 @@ from PIL import Image
 from segment_anything import SamAutomaticMaskGenerator as _SAMG
 from segment_anything import SamPredictor as _SamPredictor
 from segment_anything import sam_model_registry
-from torchvision.datapoints import BoundingBoxFormat
 
 from fsl.models import utils
 from fsl.structures import Instances
+
+# from torchvision.datapoints import BoundingBoxFormat
+
 
 _Tensor = Type[torch.Tensor]
 _Module = Type[nn.Module]
