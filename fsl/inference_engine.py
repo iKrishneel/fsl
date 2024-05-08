@@ -1,14 +1,12 @@
 #!/usr/bin/env python
 
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, Union
 
 import numpy as np
 import torch
 from igniter.engine import InferenceEngine as _InferenceEngine
 from igniter.registry import engine_registry
 from PIL import Image
-
-from fsl.utils.visualizer import Visualizer
 
 
 @engine_registry('fsl_inference_engine')

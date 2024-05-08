@@ -1,9 +1,11 @@
 #!/usr/bin/env python
 
+import functools
 from typing import Any, Dict, List, Type, Union
 
 import torch
 import torch.nn as nn
+from igniter.logger import logger
 from igniter.registry import model_registry
 from torchvision.ops import RoIAlign
 
@@ -29,7 +31,10 @@ class ClipMaskFSOD(MaskFSOD):
         super(ClipMaskFSOD, self).__init__(
             mask_generator, backbone=backbone, classifier=classifier, roi_pooler=roi_pooler
         )
-        self.clip_model = clip_model
+        self.clip = clip_model
+        self._text_embeddings = text_embeddings
+
+        breakpoint()
 
     # def forward_features(
     #     self, im_embeddings: _Tensor, text_embeddings: _Tensor, gt_bboxes: Union[_Tensor, List[_Tensor]]
@@ -46,7 +51,7 @@ class ClipMaskFSOD(MaskFSOD):
         if not self.training:
             return self.inference(images)
 
-        images = torch.stack(images).to(self.device)        
+        images = torch.stack(images).to(self.device)
         assert targets is not None and len(targets) == images.shape[0]
 
         gt_instances = [target['gt_proposal'] for target in targets]
@@ -68,8 +73,14 @@ class ClipMaskFSOD(MaskFSOD):
     def inference(self, image: _Tensor) -> Instances:
         instances = super().inference(image)
 
+        # for (x1, y1, x2, y2) in instances.bboxes.astype(int):
+        # im_roi = image[:, y1: y2, x1: x2].permute(1, 2, 0)
+
+        instances = instances.to_tensor()
+        roi_feats = self.clip.forward_image(image, instances.bboxes)
+
         breakpoint()
-        
+
         # proposals = self.mask_generator.get_proposals(images)
         # bboxes = torch.cat([proposal.to_tensor().bboxes.to(self.device) for proposal in proposals])
         # rois = torch.cat([torch.full((len(bboxes), 1), fill_value=0).to(self.device), bboxes], dim=1)
@@ -87,10 +98,43 @@ class ClipMaskFSOD(MaskFSOD):
         roi_feats = roi_feats.flatten(index).mean(index)
         return ProtoTypes(embeddings=roi_feats, labels=instances.labels, instances=instances)
 
-    def get_text_embedding(self, instances: List[Instances], prefix: str = 'This is a photo of a %s') -> _Tensor:
-        instances = [instances] if isinstance(instances, Instances) else instances
-        label_names = [prefix % name for instance in instances for name in instance.labels]
-        return torch.cat([self.clip_model.get_text_embedding(name) for name in label_names], dim=0)
+    # def get_text_embedding(self, instances: List[Instances], prefix: str = 'This is a photo of a %s') -> _Tensor:
+    #     instances = [instances] if isinstance(instances, Instances) else instances
+    #     label_names = [prefix % name for instance in instances for name in instance.labels]
+    #     return torch.cat([self.clip.get_text_embedding(name) for name in label_names], dim=0)
+
+    def get_text_embeddings(
+        self, category_names: Union[List[str], str], prefix: str = 'This is a photo of a %s'
+    ) -> _Tensor:
+        category_names = [category_names] if isinstance(category_names, str) else category_names
+        label_names = [prefix % name for name in category_names]
+        return torch.cat([self.clip.get_text_embedding(name) for name in label_names], dim=0)
+
+    def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True, assign: bool = True):
+        for key, value in self.clip.state_dict().items():
+            state_dict[f'clip.{key}'] = value
+        return super(ClipMaskFSOD, self).load_state_dict(state_dict, strict, assign)
+
+    def to(self, *args, **kwargs):
+        ret = super().to(*args, **kwargs)
+        if args[0] == torch.float16:
+            from clip.model import LayerNorm
+
+            for module in ret.clip.model.modules():
+                if isinstance(module, LayerNorm):
+                    module.to(torch.float32)
+
+        return ret
+
+    @property
+    @functools.cache
+    def text_embeddings(self) -> _Tensor:
+        # return self.get_text_embeddings(self.classifier._all_cids)
+        return self._text_embeddings
+
+    def set_descriptions(self, descriptions: Dict[str, str]) -> None:
+        self._text_embeddings = self.get_text_embedding(list(descriptions.values()))
+        [self.classifier._all_cids.index(key) for key in descriptions]
 
 
 def _build_clip_mask_fsod(
@@ -106,11 +150,11 @@ def _build_clip_mask_fsod(
 
 
 @model_registry
-def devit_dinov2_text_fsod(
+def devit_dinov2_clip_fsod(
     model_name: str = 'dinov2_vitb14',
     clip: Dict[str, Any] = {'model': 'ViT-B/32', 'remove_keys': []},
     roi_pool_size: int = 7,
-    feature_layers: List[int] = None,    
+    feature_layers: List[int] = None,
     prototype_file: str = None,
     background_prototype_file: str = None,
     label_map_file: str = None,
@@ -122,13 +166,15 @@ def devit_dinov2_text_fsod(
     _m = devit_dinov2_fsod(
         model_name, roi_pool_size, feature_layers, prototype_file, background_prototype_file, label_map_file
     )
-    
+
     clip_model = build_clip(**clip)
     if rpn_args is None:
-        model = ClipMaskFSOD(clip_model, _m.backbone, _m.classifier, _m.roi_pooler)
+        logger.warning('RPN args must be set when using CLIP. Building without mask generator')
+        model = ClipMaskFSOD(None, clip_model, _m.backbone, _m.classifier, _m.roi_pooler)
     else:
         mask_generator = build_mask_generator(rpn_args)
-        model = _build_clip_mask_fsod(mask_generator, clip_model,  _m.backbone, _m.classifier, _m.roi_pooler)
+        model = _build_clip_mask_fsod(mask_generator, clip_model, _m.backbone, _m.classifier, _m.roi_pooler)
 
     del _m
+
     return model

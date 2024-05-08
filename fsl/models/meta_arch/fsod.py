@@ -231,7 +231,7 @@ def build_mask_generator(rpn_args: DictConfig) -> nn.Module:
 
     rpn_args = dict(rpn_args)
     rpn_type = rpn_args.pop('type', 'sam').lower()
-    
+
     if rpn_type == 'sam':
         build_func = importlib.import_module('fsl.models.sam_utils').build_sam_auto_mask_generator
     elif rpn_type == 'fast_sam':
@@ -241,7 +241,7 @@ def build_mask_generator(rpn_args: DictConfig) -> nn.Module:
 
     mask_generator = build_func(**rpn_args)
     return mask_generator
-    
+
 
 @model_registry
 def devit_dinov2_fsod(
