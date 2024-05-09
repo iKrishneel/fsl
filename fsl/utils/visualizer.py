@@ -109,7 +109,7 @@ class Visualizer(object):
 
     def overlay(self, instances: Instances, colors: List[List[int]] = None, alpha: Optional[float] = 0.5):
         colors = colors or [colormap.random_color(rgb=True, maximum=1) for _ in range(len(instances))]
-        instances = instances.convert_bbox_fmt('xywh').numpy()  # .sort_by_area()
+        instances = instances.convert_bbox_fmt('xywh').numpy().sort_by_area()
 
         for i in range(len(instances)):
             color = colors[i]
@@ -141,7 +141,7 @@ class Visualizer(object):
                 lighter_color = self._change_color_brightness(color, brightness_factor=0.7)
                 font_size = np.clip((height_ratio - 0.02) / 0.08 + 1, 1.2, 2) * 0.5 * self._default_font_size
                 self.draw_text(
-                    instances.labels[i],
+                    f'{instances.labels[i]}: {instances.scores[i]:.2f}',
                     text_pos,
                     color=lighter_color,
                     horizontal_alignment=h_align,

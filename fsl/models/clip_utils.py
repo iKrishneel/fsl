@@ -38,7 +38,7 @@ class CLIP(nn.Module):
         # take features from the eot embedding (eot_token is the highest number in each sequence)
         return x[torch.arange(x.shape[0]), text.argmax(dim=-1)] @ self.model.text_projection
 
-    def forward_image(self, image: Union[_Tensor, _Image], bboxes: List[_Tensor]):
+    def forward_image(self, image: Union[_Tensor, _Image], bboxes: List[_Tensor], is_normalized: bool = True):
         if isinstance(image, torch.Tensor):
             image = image[0] if len(image.shape) == 4 else image
             image = (image - image.min()) / (image.max() - image.min())
@@ -47,13 +47,13 @@ class CLIP(nn.Module):
         if isinstance(image, np.ndarray) and image.dtype != np.uint8:
             image = (255 * image).astype(np.uint8)
 
-        img = Image.fromarray(image)
+        img = Image.fromarray(image).convert('RGB')
         im_crops = torch.stack([self.preprocessing(img.crop(bbox.int().cpu().numpy())) for bbox in bboxes])
-        roi_feats = self.model.encode_image(im_crops.to(self.device))  # .float()
-        return roi_feats
+        roi_feats = self.model.encode_image(im_crops.to(self.device))
+        return normalize(roi_feats) if is_normalized else roi_feats
 
     def forward_text(self, text_tokens: _Tensor) -> _Tensor:
-        text_features = self.encode_text(text_tokens)  # .float()
+        text_features = self.encode_text(text_tokens)
         return text_features
 
     def similarity(self, roi_feats: _Tensor, text_feats: _Tensor, alpha: float = 100.0) -> _Tensor:
