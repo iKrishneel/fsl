@@ -16,11 +16,12 @@ _Tensor = Type[torch.Tensor]
 
 
 class FSOD(nn.Module):
-    def __init__(self, backbone, classifier, roi_pooler) -> None:
+    def __init__(self, backbone, classifier, roi_pooler, use_mask: bool = False) -> None:
         super(FSOD, self).__init__()
         self.backbone = backbone
         self.classifier = classifier
         self.roi_pooler = roi_pooler
+        self.use_mask = use_mask
 
     def forward_features(self, im_embeddings: _Tensor, gt_bboxes: Union[_Tensor, List[_Tensor]]) -> _Tensor:
         # TODO: the gt_bboxes can contain noisy bboxes so add the labels
@@ -64,6 +65,13 @@ class FSOD(nn.Module):
         instances = instances.convert_bbox_fmt('xyxy').to_tensor(self.device)
         bboxes = instances.bboxes
         rois = torch.cat([torch.full((len(bboxes), 1), fill_value=0).to(self.device), bboxes], dim=1)
+
+        if self.use_mask:
+            assert hasattr(instances, 'masks') and instances.masks is not None
+            masks = instances.masks
+            masks = nn.functional.interpolate(masks[:, None], features.shape[2:], mode='nearest')
+            features = features * masks.to(features.dtype)
+
         roi_features = self.forward_features(features, rois.to(features.dtype))
         response = self.classifier(roi_features)
         return response
@@ -205,8 +213,11 @@ def _build_mask_fsod(
     backbone: nn.Module,
     classifier: nn.Module,
     roi_pooler: RoIAlign,
+    use_mask: bool = False,
 ) -> MaskFSOD:
-    return MaskFSOD(mask_generator, backbone=backbone, classifier=classifier, roi_pooler=roi_pooler)
+    return MaskFSOD(
+        mask_generator, backbone=backbone, classifier=classifier, roi_pooler=roi_pooler, use_mask=use_mask
+    )
 
 
 @model_registry('dinov2_fsod')
@@ -252,6 +263,7 @@ def devit_dinov2_fsod(
     background_prototype_file: str = None,
     label_map_file: str = None,
     rpn_args: Dict[str, Any] = None,
+    use_mask: bool = False,
 ) -> Union[FSOD, MaskFSOD]:
     model = build_dinov2_fsod(
         model_name=model_name,
@@ -269,6 +281,7 @@ def devit_dinov2_fsod(
             model.backbone,
             model.classifier,
             model.roi_pooler,
+            use_mask,
         )
 
     return model
