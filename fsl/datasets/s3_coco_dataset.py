@@ -341,11 +341,6 @@ def collate_data(batches: List[Dict[str, Any]]) -> List[Any]:
     images, targets = collate_data_instances(batches)
     targets = [target['gt_proposal'] for target in targets]
     return images, targets
-    # images, targets = [], []
-    # for batch in batches:
-    #     images.append(batch.pop('image'))
-    #     targets.append(batch)
-    # return images, targets
 
 
 @func_registry
@@ -356,8 +351,6 @@ def collate_data_instances(batches: List[Dict[str, Any]]) -> List[Any]:
     for batch in batches:
         image = batch.pop('image')
         images.append(image)
-        if len(batch['image_ids']) == 0:
-            breakpoint()
         instances = Instances(
             bboxes=batch['bboxes'],
             class_ids=batch['category_ids'],
@@ -366,6 +359,7 @@ def collate_data_instances(batches: List[Dict[str, Any]]) -> List[Any]:
             image_id=batch['image_ids'][0],
             image_width=image.shape[-1],
             image_height=image.shape[-2],
+            masks=batch['masks'] if 'masks' in batch else None,
         )
         targets.append({'gt_proposal': instances})
     return images, targets

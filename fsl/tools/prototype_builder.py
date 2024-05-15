@@ -51,9 +51,10 @@ def prototype_forward(engine, batch, save: bool = True) -> Union[None, ProtoType
         features = engine._model.get_features(torch.stack(images))
 
     for feature, image, instance in zip(features.float(), images, instances):
-        masks = bboxes2mask(instance.bboxes, image.shape[1:])
+        masks = bboxes2mask(instance.bboxes, image.shape[1:]) if instance.masks is None else instance.masks
+        masks = masks.to(torch.uint8)
         masks = torch.nn.functional.interpolate(masks[None], feature.shape[1:], mode='nearest')[0]
-        masks = masks.to(torch.bool).to(features.device)
+        masks = masks.to(torch.bool).to(feature.device)
 
         indices = [i for i, mask in enumerate(masks) if mask.sum() > 0]
 
