@@ -12,6 +12,7 @@ import numpy as np
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from PIL import Image
 
+from igniter.logger import logger
 from fsl.structures import Instances
 from fsl.utils import colormap
 
@@ -108,6 +109,10 @@ class Visualizer(object):
         return self.overlay(instances, alpha=alpha)
 
     def overlay(self, instances: Instances, colors: List[List[int]] = None, alpha: Optional[float] = 0.5):
+        if len(instances) == 0:
+            logger.warning('Nothing detected!')
+            return self.output
+
         colors = colors or [colormap.random_color(rgb=True, maximum=1) for _ in range(len(instances))]
         instances = instances.convert_bbox_fmt('xywh').numpy().sort_by_area()
 

@@ -110,6 +110,9 @@ class Resize(object):
         if bboxes is not None:
             func = TF.resize_bounding_box if tv_version_lte(15) else TF.resize_bounding_boxes
             bboxes = [func(bbox, img_hw, size=image.shape[1:])[0] for bbox in bboxes]
+
+            min_size, max_size = torch.zeros(2), torch.tensor(self.size) - 1
+            bboxes = [torch.clamp(bbox.reshape(2, -1), min_size, max_size).reshape(-1) for bbox in bboxes]
             data['bboxes'] = bboxes
 
         data['image'] = image
