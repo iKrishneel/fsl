@@ -220,7 +220,7 @@ class Normalize(object):
     def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
         image = [data.get(key) for key in ['image']][0]
         func = TF.to_image_tensor if tv_version_lte(15) else TF.to_image
-        image = TF.to_image(image).float() / 255.0
+        image = func(image).float() / 255.0
         image = TF.normalize(image, self.mean, self.std)
         data['image'] = image
         return data
