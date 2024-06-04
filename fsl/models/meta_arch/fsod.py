@@ -118,7 +118,7 @@ class FSOD(nn.Module):
 
         has_bg1 = any(
             [
-                'bg_' in key and isinstance(getattr(self.classifier, key), torch.Tensor)
+                'bg_' in key and isinstance(getattr(self.classifier, key.split('.')[0]), torch.Tensor)
                 for key in self.classifier.state_dict()
             ]
         )
