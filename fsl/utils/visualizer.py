@@ -9,11 +9,10 @@ import matplotlib as mpl
 import matplotlib.colors as mplc
 import matplotlib.figure as mplfigure
 import numpy as np
+from igniter.logger import logger
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from PIL import Image
 
-from igniter.logger import logger
-from fsl.structures import Instances
 from fsl.utils import colormap
 
 _Image = Type[Image.Image]
@@ -105,10 +104,10 @@ class Visualizer(object):
             max(np.sqrt(self.output.height * self.output.width) // 90, 10 // self.scale) * self.font_scale
         )
 
-    def __call__(self, instances: Instances, alpha: Optional[float] = 0.5, **kwargs: Dict[str, Any]) -> np.ndarray:
+    def __call__(self, instances: 'Instances', alpha: Optional[float] = 0.5, **kwargs: Dict[str, Any]) -> np.ndarray:
         return self.overlay(instances, alpha=alpha)
 
-    def overlay(self, instances: Instances, colors: List[List[int]] = None, alpha: Optional[float] = 0.5):
+    def overlay(self, instances: 'Instances', colors: List[List[int]] = None, alpha: Optional[float] = 0.5):
         if len(instances) == 0:
             logger.warning('Nothing detected!')
             return self.output
@@ -126,6 +125,8 @@ class Visualizer(object):
             if instances.masks is not None:
                 mask = instances.masks[i].astype(np.uint8) * 255
                 contours, _ = cv.findContours(mask, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+                if not len(contours):
+                    continue
                 index = np.argmax([cv.contourArea(contour) for contour in contours])
                 segment = contours[index].squeeze()
                 self.draw_polygon(segment, color, alpha=alpha)
@@ -269,6 +270,8 @@ class Visualizer(object):
 
 
 if __name__ == '__main__':
+    from fsl.structures import Instances
+    
     bboxes = np.array(
         [
             [660, 258, 728, 335],

@@ -10,7 +10,6 @@ from PIL import Image
 from torchvision.ops import RoIAlign
 from torchvision.ops.boxes import box_iou
 
-from fsl.datasets import utils
 from fsl.structures import Instances
 from fsl.utils.matcher import Matcher
 from fsl.utils.prototypes import ProtoTypes
@@ -435,6 +434,8 @@ class DeVitSam(DeVit):
         self.use_noisy_bboxes = False
 
     def sample_noisy_rois(self, images: List[_Tensor], targets: List[Dict[str, Any]]) -> Tuple[List, _Tensor]:
+        from fsl.datasets import utils
+        
         num_classes = len(self.train_class_weight)
         img_hw = images[0].shape[1:] if isinstance(images[0], torch.Tensor) else images[0].size[::-1]
         gt_instances = [target['gt_proposal'] for target in targets]

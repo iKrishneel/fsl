@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import os.path as osp
 import pickle
 from copy import deepcopy
@@ -7,7 +8,7 @@ from typing import Any, Callable, Dict, List, Type, Union
 import numpy as np
 import torch
 
-from fsl.structures import Instances
+# from fsl.structures import Instances
 
 _Tensor = Type[torch.Tensor]
 
@@ -16,7 +17,7 @@ _Tensor = Type[torch.Tensor]
 class ProtoTypes(object):
     embeddings: _Tensor
     labels: List[str]
-    instances: Instances = None
+    instances: 'Instances' = None
 
     def __post_init__(self):
         if isinstance(self.embeddings, np.ndarray):
