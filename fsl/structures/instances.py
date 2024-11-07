@@ -3,6 +3,7 @@
 from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Union
+from functools import singledispatchmethod
 
 import numpy as np
 import torch
@@ -138,8 +139,10 @@ class Instances(object):
         instance.scores = instance.scores[sorted_indices] if len(instance.scores) else None
         return instance.convert_bbox_fmt(self.bbox_fmt)
 
+    @singledispatchmethod
     def filter(self, thresh: float = 0.5) -> 'Instances':
-        instance = deepcopy(self)
+        # instance = deepcopy(self)
+        instance = self
         if len(instance.scores) == 0:
             return instance
 
@@ -149,7 +152,22 @@ class Instances(object):
             else np.where(self.scores >= thresh)
         )
         indices = indices[0]
+        return self._filter_by_indices(instance, indices)
 
+    @filter.register(list)
+    def _(self, names: List[str]):
+        if not len(self.labels):
+            return self
+
+        indices = np.array([i for i, label in enumerate(self.labels) if label not in names])
+        return self._filter_by_indices(self, indices)
+
+    @filter.register(str)
+    def _(self, name: str):
+        return self.filter([name])
+        
+    @staticmethod
+    def _filter_by_indices(instance, indices):
         if instance.bboxes is not None:
             instance.bboxes = instance.bboxes[indices]
             instance._size = len(instance.bboxes)
@@ -163,6 +181,6 @@ class Instances(object):
         if len(instance.scores):
             instance.scores = instance.scores[indices]
         return instance
-
+    
     def __len__(self) -> int:
         return self._size
