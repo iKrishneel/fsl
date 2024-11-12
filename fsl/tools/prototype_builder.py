@@ -127,12 +127,13 @@ def collate_and_write(
     model_name = engine._cfg.build.model
     dataset_name = engine._cfg.build[model_name]['dataset']
     root = os.path.join(engine._cfg.io.file_io.root, model_name, dataset_name, engine._cfg.io.file_io.folder_name)
-    _post_process_prototypes(root, filename, clean, reduction, cluster_size)
+    _, filename = _post_process_prototypes(root, filename, clean, reduction, cluster_size)
+    engine._prototype_filename = filename
 
 
 def _post_process_prototypes(
     root: str, filename: str, clean: bool = False, reduction: str = 'per_class_avg', cluster_size: int = 1
-) -> ProtoTypes:
+) -> [ProtoTypes, str]:
     def _load_pickle(filename: str) -> ProtoTypes:
         with open(filename, 'rb') as pfile:
             data = pickle.load(pfile)
@@ -191,7 +192,7 @@ def _post_process_prototypes(
         for p_file in valid_files:
             os.remove(p_file)
 
-    return prototypes
+    return prototypes, filename
 
 
 @engine_registry('prototype_engine')
