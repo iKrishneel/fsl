@@ -165,6 +165,15 @@ class Instances(object):
     @filter.register(str)
     def _(self, name: str):
         return self.filter([name])
+
+    def filter_bboxes(self, crop_box: List[float], iou_thresh: float = 0.0) -> 'Instances':
+        if len(crop_box) != 4 or crop_box[2] < crop_box[0] or crop_box[3] < crop_box[1]:
+            return self
+        crop_box = torch.tensor(crop_box) if not isinstance(crop_box, torch.Tensor) else crop_box
+        iou_scores = torchvision.ops.box_iou(self.bboxes, crop_box.reshape(1, -1))
+
+        indices = torch.where(iou_scores > iou_thresh)
+        return self._filter_by_indices(self, indices[0])
         
     @staticmethod
     def _filter_by_indices(instance, indices):
