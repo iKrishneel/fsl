@@ -125,13 +125,14 @@ class Instances(object):
         instance.image_height, instance.image_width = new_hw
         return instance
 
-    def _sort_by_area(self) -> 'Instances':
+    def _sort_by_area(self, descending: bool = True) -> 'Instances':
         if len(self.bboxes) == 0:
             return self
         instance = self.convert_bbox_fmt('xywh') if self.bbox_fmt.value != 'XYWH' else deepcopy(self)
         instance = instance.numpy()
         areas = np.prod(instance.bboxes[:, 2:], axis=1)
-        sorted_indices = np.argsort(-areas).tolist()
+        order = -1 if descending else 1
+        sorted_indices = np.argsort(order * areas).tolist()
         instance.bboxes = instance.bboxes[sorted_indices] if instance.bboxes is not None else None
         instance.masks = instance.masks[sorted_indices] if instance.masks is not None else None
         instance.labels = [instance.labels[i] for i in sorted_indices] if len(instance.labels) else None

@@ -45,7 +45,7 @@ class ResizeLongestSide(object):
 
         target_size = self.get_preprocess_shape(*img_hw, self.size)
         image = TF.resize(image, target_size, antialias=True)
-
+        
         if 'masks' in data:
             data['masks'] = TF.resize(
                 data['masks'], target_size, interpolation=TF.InterpolationMode.NEAREST, antialias=True
@@ -55,7 +55,7 @@ class ResizeLongestSide(object):
             func = TF.resize_bounding_box if tv_version_lte(15) else TF.resize_bounding_boxes
             bboxes = [func(bbox, img_hw, size=target_size)[0] for bbox in bboxes]
             data['bboxes'] = bboxes
-
+            
         data['image'] = image
         return data
 
@@ -247,7 +247,7 @@ class RandomResizeCrop(transforms.RandomResizedCrop):
     def forward(self, data: Dict[str, Any]) -> Dict[str, Any]:
         if not np.random.choice([True, False]):
             return Resize(self.size)(data)
-
+        
         image = data['image']
 
         func_bb = TF.resized_crop_bounding_box if tv_version_lte(15) else TF.resized_crop_bounding_boxes
@@ -255,11 +255,7 @@ class RandomResizeCrop(transforms.RandomResizedCrop):
         i, j, h, w = self.get_params(image, self.scale, self.ratio)
         data['image'] = TF.resized_crop(image, i, j, h, w, self.size, self.interpolation, antialias=self.antialias)
 
-        if 'masks' in data:
-            data['masks'] = TF.resized_crop(
-                data['masks'], i, j, h, w, self.size, transforms.InterpolationMode.NEAREST, antialias=self.antialias
-            )
-
+        flags = None
         if 'bboxes' in data:
             bboxes = data['bboxes']
             bboxes = torch.stack(bboxes) if isinstance(bboxes, list) else bboxes
@@ -271,6 +267,12 @@ class RandomResizeCrop(transforms.RandomResizedCrop):
             data['category_ids'] = data['category_ids'][flags]
             data['category_names'] = [name for i, name in enumerate(data['category_names']) if flags[i]]
 
+        if 'masks' in data:
+            masks = TF.resized_crop(
+                data['masks'], i, j, h, w, self.size, transforms.InterpolationMode.NEAREST, antialias=self.antialias
+            )
+            data['masks'] = masks[flags] if flags is not None else masks
+            
         return data
 
 
