@@ -20,7 +20,7 @@ torchvision.disable_beta_transforms_warning()
 from igniter.datasets import S3CocoDataset, S3Dataset
 from igniter.logger import logger
 from igniter.registry import dataset_registry, func_registry
-from pycocotools.mask import decode
+from pycocotools import mask as mask_utils
 
 from fsl.utils import version
 
@@ -98,7 +98,7 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
     def __getitem__(self, index: int) -> Dict[str, Any]:
         label_name_mapping = {v['id']: v['name'] for v in self.coco.dataset['categories']}
         target_mask_decoder = (
-            lambda target: decode(target['segmentation'])
+            lambda target: mask_utils.decode(target['segmentation'])
             if isinstance(target['segmentation'], dict)
             else self.coco.annToMask(target)
         )
@@ -198,16 +198,19 @@ class S3CocoDatasetForDetection(S3CocoDataset):
 
 
 @dataset_registry('fs_coco')
-class S3CocoDatasetFS(S3CocoDataset):
+# class S3CocoDatasetFS(S3CocoDataset):
+class S3CocoDatasetFS(torch.utils.data.Dataset):
     def __init__(
         self,
-        bucket_name: str,
         root: str,
         json_file: str,
         label_map_file: str,
+        bucket_name: str = None,            
         filename_signature: str = 'full_box_%sshot_%s_trainval.json',
+        transforms: Any = None,
         **kwargs,
     ) -> None:
+        self.transforms = transforms
         json_filename = os.path.splitext(os.path.basename(json_file))[0]
         if 'shot' in json_filename:
             match = re.search(r'\d+shot', json_filename)
@@ -232,9 +235,16 @@ class S3CocoDatasetFS(S3CocoDataset):
         anno_fn = '/tmp/fs_coco_anno.json'
         with open(anno_fn, 'w') as json_file:
             json.dump(dataset, json_file)
-        super(S3CocoDatasetFS, self).__init__(bucket_name, root, anno_fn, **kwargs)
-        self.apply_transforms = False
 
+        if bucket_name is None:
+            # super(S3CocoDatasetFS, self).__init__(bucket_name, root, anno_fn, **kwargs)
+            self.coco = S3CocoDatasetFS(bucket_name, root, anno_fn, **kwargs)
+        else:
+            from torchvision.datasets import CocoDetection
+
+            self.coco = CocoDetection(root=root, annFile=anno_fn, transform=None)
+
+        # self.apply_transforms = False
         # import IPython, sys; IPython.embed(); sys.exit()
 
     def _prepare_data_catalog(self, anno_dict, shot: int, split_dir: str, filename_signature: str):
@@ -299,7 +309,7 @@ class S3CocoDatasetFS(S3CocoDataset):
         return dataset
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
-        image, targets = super().__getitem__(index)
+        image, targets = self.coco[index]
         bboxes = [torch.FloatTensor(target['bbox']) for target in targets]
         category_ids = [target['category_id'] for target in targets]
         category_names = [target['category_name'] for target in targets]
@@ -307,20 +317,32 @@ class S3CocoDatasetFS(S3CocoDataset):
 
         assert len(bboxes) > 0, 'Empty bounding boxes'
 
+        masks = np.array(
+            [
+                mask_utils.decode(mask_utils.frPyObjects(target['segmentation'], *image.size))[..., 0]
+                for target in targets
+            ]
+        )
+
+        masks = torch.as_tensor(masks)        
         image = functional.pil_to_tensor(image)
 
         data = {
             'image': image,
+            'masks': masks,
             'bboxes': bboxes,
             'category_ids': category_ids,
             'image_ids': image_ids,
             'category_names': category_names,
         }
-
+    
         if self.transforms is not None:
             data = self.transforms(data)
 
         return data
+
+    def __len__(self) -> int:
+        return len(self.coco)
 
 
 def load_coco(json_file: str):
@@ -352,7 +374,7 @@ def collate_data_instances(batches: List[Dict[str, Any]]) -> List[Any]:
         image = batch.pop('image')
         images.append(image)
         instances = Instances(
-            bboxes=batch['bboxes'],
+            bboxes=torch.stack(batch['bboxes']),
             class_ids=batch['category_ids'],
             labels=batch['category_names' if 'category_names' in batch else 'category_ids'],
             bbox_fmt=BoundingBoxFormat.XYXY,

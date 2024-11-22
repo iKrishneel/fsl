@@ -61,20 +61,27 @@ class Instances(object):
 
     def convert_bbox_fmt(self, bbox_fmt: Union[BoundingBoxFormat, str]) -> 'Instances':
         assert len(self.bboxes) > 0, 'No bounding box instance'
+        
+        bbox_fmt = getattr(BoundingBoxFormat, bbox_fmt.upper()) if isinstance(bbox_fmt, str) else bbox_fmt
 
-        if isinstance(bbox_fmt, str):
-            bbox_fmt = getattr(BoundingBoxFormat, bbox_fmt.upper())
+        func = getattr(functional, 'convert_bounding_box_format', None)
+        func = func or getattr(functional, 'convert_format_bounding_box', None)
+        assert func is not None
 
-        instances = deepcopy(self)
-        for i, bbox in enumerate(instances.bboxes):
-            bbox = torch.as_tensor(bbox) if not isinstance(bbox, torch.Tensor) else bbox
-            try:
-                bbox = functional.convert_format_bounding_box(bbox, instances.bbox_fmt, bbox_fmt)
-            except AttributeError:
-                bbox = functional.convert_bounding_box_format(bbox, instances.bbox_fmt, bbox_fmt)
-            instances.bboxes[i] = bbox if isinstance(instances.bboxes[i], torch.Tensor) else bbox.cpu().numpy()
-        instances.bbox_fmt = bbox_fmt
-        return instances
+        self.bboxes = torch.stack(self.bboxes) if isinstance(self.bboxes, list) else self.bboxes
+        bb = func(self.bboxes, self.bbox_fmt, bbox_fmt)
+
+        # instances = deepcopy(self) if copy else self
+        # for i, bbox in enumerate(instances.bboxes):
+        #     bbox = torch.as_tensor(bbox) if not isinstance(bbox, torch.Tensor) else bbox
+        #     try:
+        #         bbox = functional.convert_format_bounding_box(bbox, instances.bbox_fmt, bbox_fmt)
+        #     except AttributeError:
+        #         bbox = functional.convert_bounding_box_format(bbox, instances.bbox_fmt, bbox_fmt)
+        #     instances.bboxes[i] = bbox if isinstance(instances.bboxes[i], torch.Tensor) else bbox.cpu().numpy()
+
+        self.bbox_fmt = bbox_fmt
+        return self
 
     def to_tensor(self, device: str = 'cpu') -> 'Instances':
         instances = deepcopy(self)

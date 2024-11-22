@@ -1,4 +1,6 @@
-device: "cuda"
+driver: fsl.main
+device: cuda
+dtype: float16
 
 models:
   sam_fsod:
@@ -13,6 +15,7 @@ models:
     roi_pool_size: 7
   devit_dinov2_fsod:
     roi_pool_size: 7
+    use_mask: True
   resnet_clip_fsod:
     clip_args:
       model_name: "ViT-B/32"
@@ -21,13 +24,14 @@ models:
 
 datasets:
   dataloader:
-    num_workers: 1
+    num_workers: 0
     shuffle: False
     collate_fn: "collate_data"
   fs_coco:
     val: &data
       bucket_name: "sr-shokunin"
-      root: "perception/datasets/coco/train2017"
+      # root: "perception/datasets/coco/train2017"
+      root: "/root/krishneel/Downloads/datasets/coco/train2017"
       json_file: "/root/krishneel/Downloads/coco/fs_coco_trainval_novel_30shot.json"
       label_map_file: "../../../data/coco/label_mapping.json"
 
@@ -89,7 +93,7 @@ build:
     <<: *setup
     transforms: "trans_dino"
 
-  model: "resnet_fsod"
+  model: devit_dinov2_fsod
 
 options:
   train: False

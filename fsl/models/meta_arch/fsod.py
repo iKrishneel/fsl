@@ -61,26 +61,29 @@ class FSOD(nn.Module):
 
     @torch.inference_mode()
     def inference(self, images: _Tensor, instances: Instances) -> Tuple[Dict[str, Any]]:
-        features = self.get_features(images)
-        instances = instances.convert_bbox_fmt('xyxy').to_tensor(self.device)
-        bboxes = instances.bboxes
+        features = self.get_features(images)        
+        roi_features = self.get_roi_features(features, instances)
+        response = self.classifier(roi_features)
+        return response
+
+    @torch.no_grad()
+    def get_roi_features(self, features: _Tensor, instances: Instances) -> Tuple[Dict[str, Any]]:
+        instances = instances.convert_bbox_fmt('xyxy') # .to_tensor(self.device)
+        bboxes = instances.bboxes.to(features.device, non_blocking=True)
 
         if self.use_mask:
             assert hasattr(instances, 'masks') and instances.masks is not None
-            masks = instances.masks
+            masks = instances.masks.to(features.device, non_blocking=True)
             masks = nn.functional.interpolate(masks[:, None], features.shape[2:], mode='nearest')
             features = features * masks.to(features.dtype)
 
-            batch_indices = torch.arange(len(bboxes)).unsqueeze(1).to(bboxes.dtype).to(bboxes.device)
+            batch_indices = torch.arange(len(bboxes), device=bboxes.device, dtype=bboxes.dtype).unsqueeze(1)
             rois = torch.cat([batch_indices, bboxes], dim=1)
         else:
-            rois = torch.cat(
-                [torch.full((len(bboxes), 1), fill_value=0).to(self.device), bboxes], dim=1
-            )
+            rois = torch.cat([torch.full((len(bboxes), 1), fill_value=0, device=self.device), bboxes], dim=1)
 
         roi_features = self.forward_features(features, rois.to(features.dtype))
-        response = self.classifier(roi_features)
-        return response
+        return roi_features
 
     @torch.no_grad()
     def build_image_prototypes(self, image: _Tensor, instances: Instances) -> ProtoTypes:
@@ -97,7 +100,8 @@ class FSOD(nn.Module):
         images = images if len(images.shape) == 4 else images[None]
         assert len(images.shape) == 4
 
-        features = self.backbone(images.to(self.device), norm=False)
+        images = images.to(self.device, non_blocking=True)
+        features = self.backbone(images, norm=False)
         features = features[0] if len(features) == 1 else features
 
         if isinstance(features, (list, tuple)):
@@ -205,13 +209,14 @@ def _build_fsod(
     prototype_file: str = None,
     background_prototype_file: str = None,
     label_map_file: str = None,
+    use_mask: bool = False,
 ) -> FSOD:
     from fsl.models.devit import build_devit
 
     roi_pooler = RoIAlign(roi_pool_size, spatial_scale=1 / backbone.downsize, sampling_ratio=-1)
     classifier = build_devit(prototype_file, background_prototype_file, label_map_file)
 
-    return FSOD(backbone, classifier, roi_pooler)
+    return FSOD(backbone, classifier, roi_pooler, use_mask)
 
 
 def _build_mask_fsod(
@@ -234,12 +239,15 @@ def build_dinov2_fsod(
     prototype_file: str = None,
     background_prototype_file: str = None,
     label_map_file: str = None,
+    use_mask: bool = False,
 ) -> FSOD:
     from ..backbone import DinoV2Backbone as DinoV2Patch
 
     backbone = DinoV2Patch.build(model_name=model_name, frozen=True, feat_layers=feature_layers)
     backbone = backbone.to(torch.float16)
-    return _build_fsod(backbone, roi_pool_size, prototype_file, background_prototype_file, label_map_file)
+    return _build_fsod(
+        backbone, roi_pool_size, prototype_file, background_prototype_file, label_map_file, use_mask=use_mask
+    )
 
 
 def build_mask_generator(rpn_args: DictConfig) -> nn.Module:
@@ -278,6 +286,7 @@ def devit_dinov2_fsod(
         prototype_file=prototype_file,
         background_prototype_file=background_prototype_file,
         label_map_file=label_map_file,
+        use_mask=use_mask
     )
 
     if rpn_args is not None:

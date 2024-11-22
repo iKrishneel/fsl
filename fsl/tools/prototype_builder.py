@@ -51,26 +51,23 @@ def prototype_forward(engine, batch, save: bool = True) -> Union[None, ProtoType
         features = engine._model.get_features(torch.stack(images))
 
     for feature, image, instance in zip(features.float(), images, instances):
-        masks = bboxes2mask(instance.bboxes, image.shape[1:]) if instance.masks is None else instance.masks
-        masks = masks.to(torch.uint8)
-        masks = torch.nn.functional.interpolate(masks[None], feature.shape[1:], mode='nearest')[0]
-        masks = masks.to(torch.bool).to(feature.device)
+        roi_features = engine._model.get_roi_features(feature[None], instance)
 
-        indices = [i for i, mask in enumerate(masks) if mask.sum() > 0]
-
-        if len(indices) == 0:
-            return
-
+        indices = [i for i, roi_feature in enumerate(roi_features) if roi_feature.sum() != 0]
         labels = [instance.labels[i] for i in indices]
-        tokens = torch.stack([(feature * masks[index]).flatten(1).sum(1) / masks[index].sum() for index in indices])
+        tokens = roi_features[torch.tensor(indices).long()].flatten(1)
 
+        if len(labels) == 0:
+            logger.debug(f'Empty ROI image_id {instance.image_id}')
+            continue
+        
         if torch.any(torch.isnan(tokens)) or torch.any(torch.isinf(tokens)):
             logger.warning(f'NaN/Inf in features for image_id: {instance.image_id}')
             continue
 
-        prototypes = ProtoTypes(tokens, labels=labels)
+        prototypes = ProtoTypes(tokens.float(), labels=labels)
         if save:
-            engine.file_io(prototypes, instance.image_id, engine._cfg.build.model)
+            path = engine.file_io(prototypes, instance.image_id, engine._cfg.build.model)
         else:
             all_prototypes = prototypes if all_prototypes is None else all_prototypes + prototypes
 
