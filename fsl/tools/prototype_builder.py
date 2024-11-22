@@ -55,7 +55,7 @@ def prototype_forward(engine, batch, save: bool = True) -> Union[None, ProtoType
 
         indices = [i for i, roi_feature in enumerate(roi_features) if roi_feature.sum() != 0]
         labels = [instance.labels[i] for i in indices]
-        tokens = roi_features[torch.tensor(indices).long()].flatten(1)
+        tokens = roi_features[torch.tensor(indices).long()].flatten(2).mean(2)
 
         if len(labels) == 0:
             logger.debug(f'Empty ROI image_id {instance.image_id}')
