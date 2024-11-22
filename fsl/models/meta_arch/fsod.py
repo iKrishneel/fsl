@@ -43,19 +43,18 @@ class FSOD(nn.Module):
         names = [label for gt_instance in gt_instances for label in gt_instance.labels]
 
         for i, name in enumerate(names):
-            if name not in self.classifier._all_cids:
+            if name not in self.classifier._seen_cids:
                 continue
-            class_labels[i] = self.classifier._all_cids.index(name)
+            class_labels[i] = self.classifier._seen_cids.index(name)
 
         class_labels = torch.IntTensor(class_labels)
-        # [self.classifier.index(name) for name in names]
-
-        # class_labels = torch.cat(class_labels)
         class_labels[class_labels == -1] = self.classifier.train_class_weight.shape[0]
-
-        im_embeddings = self.get_features(images)
-
-        roi_features = self.forward_features(im_embeddings, gt_bboxes)
+        
+        features = self.get_features(images)
+        roi_features = torch.cat(
+            [self.get_roi_features(feat[None], gt_instance) for feat, gt_instance in zip(features, gt_instances)]
+        )
+        
         loss_dict = self.classifier(roi_features, class_labels)
         return loss_dict
 

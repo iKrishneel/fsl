@@ -1,5 +1,7 @@
-_base_: "sam_vitb_trainval_30shot.yaml"
-device: "cuda"
+# _base_: "sam_vitb_trainval_30shot.yaml"
+driver: fsl.main
+device: cuda
+dtype: float16
 
 workdir:
   path: "/tmp/fsl/devit_dinov2_fsod/"
@@ -12,16 +14,27 @@ models:
   devit_dinov2_fsod:
     model_name: "dinov2_vitb14"
     roi_pool_size: 7
+    use_mask: True
     label_map_file: "../../data/coco/label_mapping.json"
     # prototype_file: "/root/krishneel/Downloads/fsl/prototypes/dinov2/coco14/fs_coco14_trainval_base_30shot_vitb14.pkl"
     # background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/dinov2/coco14/background_prototypes_vitb14.pkl"
-    prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_dinov2_fsod/fg/fs_coco14_trainval_base_30shot_vitb14.pkl"
-    background_prototype_file: "/root/krishneel/Downloads/fsl/prototypes/devit_dinov2_fsod/bg/background_prototypes_vitb14.pkl"
+    prototype_file: /root/krishneel/Downloads/fsl/prototypes/devit_dinov2_fsod/fg/fs_coco14_trainval_base_30shot_vitb14.pkl
+    background_prototype_file: /root/krishneel/Downloads/fsl/prototypes/devit_dinov2_fsod/bg/background_prototypes_vitb14.pkl
 
 datasets:
   dataloader:
-    batch_size: 8
-    num_workers: 12
+    batch_size: 2
+    num_workers: 2
+    shuffle: False
+    collate_fn: "collate_data_instances"
+  coco:
+    train:
+      root: ${oc.env:IGNITER_DATASET}/train2017/
+      anno_fn: "/root/krishneel/Downloads/fsl/fs_coco17_base_train.json"
+      use_mask: True
+    val:
+      root: ${oc.env:IGNITER_DATASET}/val2017
+      anno_fn: "/root/krishneel/Downloads/fsl/fs_coco17_base_val.json"
 
 transforms:
   dinov2_trans:
@@ -43,9 +56,23 @@ transforms:
       mean: [0.48145466, 0.4578275, 0.40821073]
       std: [0.26862954, 0.26130258, 0.27577711]
 
+solvers:
+  engine: "torch.optim"
+  snapshot: 5000
+
+  SGD:
+    lr: 0.001
+    momentum: 0.5
+  schedulers:
+    StepLR:
+      step_size: 5
+      gamma: 0.1
+
 io:
   checkpoint:
-    root: "perception/models/fsl/devit_dinov2_fsod/"
+    engine: 's3_writer'
+    bucket_name: sr-shokunin
+    root: "perception/models/fsl/devit_dinov2_fsod/20241122/"
 
 build:
   mode: "train"

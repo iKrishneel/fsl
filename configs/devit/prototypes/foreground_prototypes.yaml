@@ -29,9 +29,8 @@ datasets:
     collate_fn: "collate_data"
   fs_coco:
     val: &data
-      bucket_name: "sr-shokunin"
-      # root: "perception/datasets/coco/train2017"
-      root: "/root/krishneel/Downloads/datasets/coco/train2017"
+      bucket_name: null
+      root: ${oc.env:IGNITER_DATASET}/train2017
       json_file: "/root/krishneel/Downloads/coco/fs_coco_trainval_novel_30shot.json"
       label_map_file: "../../../data/coco/label_mapping.json"
 

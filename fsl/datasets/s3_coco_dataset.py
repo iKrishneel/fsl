@@ -14,6 +14,7 @@ import torchvision
 from omegaconf import DictConfig, OmegaConf
 from PIL import Image
 from torchvision.transforms.v2 import functional
+from torchvision.datasets import CocoDetection
 
 torchvision.disable_beta_transforms_warning()
 
@@ -30,14 +31,20 @@ else:
     from torchvision.tv_tensors import BoundingBoxFormat
 
 
-class S3CocoDatasetSam(S3CocoDataset):
-    def __init__(self, *args, **kwargs):
-        super(S3CocoDatasetSam, self).__init__(*args, **kwargs)
+class S3CocoDatasetSam(torch.utils.data.Dataset):
+    def __init__(self, root: str, anno_fn: str, transforms: Any = None, bucket_name: str = None, **kwargs):
+        if os.path.isdir(root) and os.path.isfile(anno_fn):
+            self.coco = CocoDetection(root=root, annFile=anno_fn, transform=None)
+        elif bucket_name is not None:
+            self.coco = S3CocoDataset(bucket_name=bucket_name, root=root, anno_fn=anno_fn)
+        else:
+            raise TypeError
 
+        self.transforms = transforms
         self.im_size = kwargs.get('image_size', None)
 
-        size = len(self.ids)
-        self.ids = [iid for iid in self.ids if len(self.coco.getAnnIds(iid)) != 0]
+        size = len(self.coco.ids)
+        self.ids = [iid for iid in self.coco.ids if len(self.coco.coco.getAnnIds(iid)) != 0]
 
         if len(self.ids) != size:
             logger.info(f'Removing {size - len(self.ids)} empty annotations')
@@ -82,6 +89,9 @@ class S3CocoDatasetSam(S3CocoDataset):
 
         return {'image': image, 'sam_feats': sam_feats, 'filename': filename, 'bboxes': bboxes}
 
+    def __len__(self) -> int:
+        return len(self.coco)
+    
     @staticmethod
     def xywh_to_xyxy(bbox: List[float]) -> List[float]:
         x, y, w, h = bbox
@@ -96,17 +106,20 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
         self.use_mask = kwargs.get('use_mask', False)
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
-        label_name_mapping = {v['id']: v['name'] for v in self.coco.dataset['categories']}
+        label_name_mapping = {v['id']: v['name'] for v in self.coco.coco.dataset['categories']}
         target_mask_decoder = (
             lambda target: mask_utils.decode(target['segmentation'])
             if isinstance(target['segmentation'], dict)
-            else self.coco.annToMask(target)
+            else self.coco.coco.annToMask(target)
         )
 
         while True:
             try:
                 iid = self.ids[index]
-                image, targets = self._load(iid)
+                if isinstance(self.coco, CocoDetection):
+                    image, targets = self.coco[index]
+                else:
+                    image, targets = self._load(iid)
 
                 masks = (
                     [
@@ -133,7 +146,7 @@ class S3CocoDatasetFSLEpisode(S3CocoDatasetSam):
 
                 break
             except Exception as e:
-                index = np.random.choice(np.arange(len(self.ids)))
+                index = int(np.random.choice(np.arange(len(self.ids))))
                 if not isinstance(e, AssertionError):
                     logger.warning(f'{e} for iid: {iid} index: {index}')
 
@@ -198,7 +211,6 @@ class S3CocoDatasetForDetection(S3CocoDataset):
 
 
 @dataset_registry('fs_coco')
-# class S3CocoDatasetFS(S3CocoDataset):
 class S3CocoDatasetFS(torch.utils.data.Dataset):
     def __init__(
         self,
@@ -212,6 +224,7 @@ class S3CocoDatasetFS(torch.utils.data.Dataset):
     ) -> None:
         self.transforms = transforms
         json_filename = os.path.splitext(os.path.basename(json_file))[0]
+
         if 'shot' in json_filename:
             match = re.search(r'\d+shot', json_filename)
             assert match
@@ -236,12 +249,9 @@ class S3CocoDatasetFS(torch.utils.data.Dataset):
         with open(anno_fn, 'w') as json_file:
             json.dump(dataset, json_file)
 
-        if bucket_name is None:
-            # super(S3CocoDatasetFS, self).__init__(bucket_name, root, anno_fn, **kwargs)
+        if bucket_name is not None:
             self.coco = S3CocoDatasetFS(bucket_name, root, anno_fn, **kwargs)
         else:
-            from torchvision.datasets import CocoDetection
-
             self.coco = CocoDetection(root=root, annFile=anno_fn, transform=None)
 
         # self.apply_transforms = False

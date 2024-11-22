@@ -118,6 +118,7 @@ class DeVit(nn.Module):
         self.fc_intra_class = nn.Linear(self.t_pos_emb, self.temb)
 
         self._all_cids = all_cids
+        self._seen_cids = seen_cids
 
     def _setup_prototypes(
         self, prototypes: ProtoTypes, all_cids: List[str] = None, seen_cids: List[str] = None, is_bg: bool = False
