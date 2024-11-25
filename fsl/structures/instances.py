@@ -69,6 +69,7 @@ class Instances(object):
         assert func is not None
 
         self.bboxes = torch.stack(self.bboxes) if isinstance(self.bboxes, list) else self.bboxes
+        self.bboxes = torch.from_numpy(self.bboxes) if isinstance(self.bboxes, np.ndarray) else self.bboxes
         bb = func(self.bboxes, self.bbox_fmt, bbox_fmt)
 
         # instances = deepcopy(self) if copy else self

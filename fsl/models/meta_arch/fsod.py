@@ -49,18 +49,18 @@ class FSOD(nn.Module):
 
         class_labels = torch.IntTensor(class_labels)
         class_labels[class_labels == -1] = self.classifier.train_class_weight.shape[0]
-        
+
         features = self.get_features(images)
         roi_features = torch.cat(
             [self.get_roi_features(feat[None], gt_instance) for feat, gt_instance in zip(features, gt_instances)]
         )
-        
+
         loss_dict = self.classifier(roi_features, class_labels)
         return loss_dict
 
     @torch.inference_mode()
     def inference(self, images: _Tensor, instances: Instances) -> Tuple[Dict[str, Any]]:
-        features = self.get_features(images)        
+        features = self.get_features(images)
         roi_features = self.get_roi_features(features, instances)
         response = self.classifier(roi_features)
         return response
@@ -177,7 +177,7 @@ class MaskFSOD(FSOD):
         image = image.to(self.dtype)
         im_np = image.permute(1, 2, 0).cpu().numpy()
         instances = self.mask_generator.get_proposals(im_np)
-        return instances.convert_bbox_fmt('xyxy')
+        return instances.to_tensor().convert_bbox_fmt('xyxy')
 
     def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True, assign: bool = True):
         for key in self.mask_generator.state_dict():

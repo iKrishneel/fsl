@@ -113,7 +113,7 @@ class Visualizer(object):
             return self.output
 
         colors = colors or [colormap.random_color(rgb=True, maximum=1) for _ in range(len(instances))]
-        instances = instances.convert_bbox_fmt('xywh').numpy().sort_by_area()
+        instances = instances.convert_bbox_fmt('xywh').sort_by_area().numpy()
 
         for i in range(len(instances)):
             color = colors[i]

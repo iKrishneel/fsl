@@ -13,7 +13,7 @@ def visualize(data: Dict[str, Any], color=None, show: bool = True):
     import matplotlib.pyplot as plt
 
     image, pred = data['image'], data['pred']
-    im_viz = Visualizer(image)(pred, color=color)
+    im_viz = Visualizer(image)(pred.numpy(), color=color)
 
     plt.imshow(im_viz.get_image())
     plt.show()
