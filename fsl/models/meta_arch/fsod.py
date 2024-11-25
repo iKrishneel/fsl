@@ -64,13 +64,19 @@ class FSOD(nn.Module):
         features = self.get_features(images)
         instances = instances.convert_bbox_fmt('xyxy').to_tensor(self.device)
         bboxes = instances.bboxes
-        rois = torch.cat([torch.full((len(bboxes), 1), fill_value=0).to(self.device), bboxes], dim=1)
 
         if self.use_mask:
             assert hasattr(instances, 'masks') and instances.masks is not None
             masks = instances.masks
             masks = nn.functional.interpolate(masks[:, None], features.shape[2:], mode='nearest')
             features = features * masks.to(features.dtype)
+
+            batch_indices = torch.arange(len(bboxes)).unsqueeze(1).to(bboxes.dtype).to(bboxes.device)
+            rois = torch.cat([batch_indices, bboxes], dim=1)
+        else:
+            rois = torch.cat(
+                [torch.full((len(bboxes), 1), fill_value=0).to(self.device), bboxes], dim=1
+            )
 
         roi_features = self.forward_features(features, rois.to(features.dtype))
         response = self.classifier(roi_features)

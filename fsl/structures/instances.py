@@ -13,6 +13,7 @@ torchvision.disable_beta_transforms_warning()
 
 from torchvision.transforms.v2 import functional
 
+from igniter.logger import logger
 from fsl.utils import version
 
 if version.minor_version(torchvision.__version__) <= 15:
@@ -60,7 +61,9 @@ class Instances(object):
         self._size = size
 
     def convert_bbox_fmt(self, bbox_fmt: Union[BoundingBoxFormat, str]) -> 'Instances':
-        assert len(self.bboxes) > 0, 'No bounding box instance'
+        if len(self.bboxes) == 0:
+            logger.warning('No bounding box instance')
+            return self
 
         if isinstance(bbox_fmt, str):
             bbox_fmt = getattr(BoundingBoxFormat, bbox_fmt.upper())

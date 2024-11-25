@@ -117,7 +117,7 @@ class Visualizer(object):
 
         for i in range(len(instances)):
             color = colors[i]
-            if instances.bboxes is not None:
+            if instances.bboxes is not None and len(instances.bboxes):
                 self.draw_box(instances.bboxes[i], edge_color=color)
                 text_pos = instances.bboxes[i]
                 h_align = 'left'
