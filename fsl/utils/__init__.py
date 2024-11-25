@@ -18,4 +18,5 @@ def visualize(data: Dict[str, Any], color=None, show: bool = True):
     if show:
         plt.imshow(im_viz.get_image())
         plt.show()
+        return
     return im_viz.get_image()
