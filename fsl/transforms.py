@@ -239,6 +239,15 @@ class ResizeToDivisible(object):
 
 
 @transform_registry
+@dataclass
+class ImageToTensor(object):
+    def __call__(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        image = data['image']
+        data['image'] = TF.to_image(image).data
+        return data
+
+
+@transform_registry
 class RandomResizeCrop(transforms.RandomResizedCrop):
     def __init__(self, *args, **kwargs):
         self.min_size = kwargs.pop('min_size', 10)

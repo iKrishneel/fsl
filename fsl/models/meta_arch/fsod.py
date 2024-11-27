@@ -139,11 +139,10 @@ class FSOD(nn.Module):
                 if hasattr(self.classifier, name):
                     if isinstance(getattr(self.classifier, name), torch.Tensor):
                         new_state_dict[key] = getattr(self.classifier, name)
-                        # delattr(self.classifier, name)
+                        # print(">>>> ", name, key, new_state_dict[key].shape)
                     else:
                         delattr(self.classifier, name)
-
-                self.classifier.register_buffer(name, state_dict[key])
+                        self.classifier.register_buffer(name, state_dict[key])
 
         if not has_bg1 and has_bg2:
             self.classifier._init_bg_layers()
@@ -170,6 +169,7 @@ class MaskFSOD(FSOD):
         response = super(MaskFSOD, self).inference(image, instances)
         # response[0].update({'instances': instances})
         instances.scores = response[0]['scores']
+        breakpoint()
         return instances
 
     @torch.inference_mode()
@@ -178,6 +178,25 @@ class MaskFSOD(FSOD):
         im_np = image.permute(1, 2, 0).cpu().numpy()
         instances = self.mask_generator.get_proposals(im_np)
         return instances.to_tensor().convert_bbox_fmt('xyxy')
+
+    """
+    @torch.no_grad()
+    def get_proposals(self, image: torch.Tensor) -> Instances:
+        im_hw = image.shape[1:]
+        size = torch.tensor(im_hw)
+        size = size - (size % 32)
+        im = nn.functional.interpolate(image[None], list(size), mode='bilinear', align_corners=True).float()
+        im = (im - im.min()) / (im.max() - im.min())
+        results = self.mask_generator.sam.predict(im[0])
+        instances = Instances(
+            bboxes=results[0].boxes.data[:, :4].cpu().numpy(),
+            masks=torch.cat([mask.data for mask in results[0].masks]).cpu().numpy(),
+            bbox_fmt='xyxy',
+            image_height=size[0],
+            image_width=size[1],
+        )
+        return instances.resize(im_hw)
+    """
 
     def load_state_dict(self, state_dict: Dict[str, Any], strict: bool = True, assign: bool = True):
         for key in self.mask_generator.state_dict():

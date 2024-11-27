@@ -17,3 +17,10 @@ def visualize(data: Dict[str, Any], color=None, show: bool = True):
 
     plt.imshow(im_viz.get_image())
     plt.show()
+
+
+@func_registry('fsl_filter_instances')
+def filter_instances(data: Dict[str, Any], thresh: float) -> Dict[str, Any]:
+    data['pred'] = data['pred'].filter(thresh)
+    data['pred'] = data['pred'].filter(['__background__'])
+    return data
