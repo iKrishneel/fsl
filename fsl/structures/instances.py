@@ -170,14 +170,23 @@ class Instances(object):
     def _(self, name: str):
         return self.filter([name])
 
-    def filter_bboxes(self, crop_box: List[float], iou_thresh: float = 0.0) -> 'Instances':
+    def filter_bboxes(self, crop_box: List[float], iou_thresh: float = 0.0, filter_type: str = 'iou') -> 'Instances':
         if len(crop_box) != 4 or crop_box[2] < crop_box[0] or crop_box[3] < crop_box[1]:
             return self
-        crop_box = torch.tensor(crop_box) if not isinstance(crop_box, torch.Tensor) else crop_box
-        iou_scores = torchvision.ops.box_iou(self.bboxes, crop_box.reshape(1, -1))
 
-        indices = torch.where(iou_scores > iou_thresh)
-        return self._filter_by_indices(self, indices[0])
+        filter_type = str(filter_type).lower()        
+        if filter_type == 'iou':
+            crop_box = torch.tensor(crop_box) if not isinstance(crop_box, torch.Tensor) else crop_box            
+            iou_scores = torchvision.ops.box_iou(self.bboxes, crop_box.reshape(1, -1))
+            indices = torch.where(iou_scores > iou_thresh)[0]
+        elif filter_type == 'intersect':
+            x1, y1, x2, y2 = crop_box
+            condition = (self.bboxes[:, 0] >= x1) & (self.bboxes[:, 1] >= y1) & (self.bboxes[:, 2] <= x2) & (self.bboxes[:, 3] <= y2)
+            indices = torch.nonzero(condition).squeeze()
+        else:
+            raise TypeError(f'Unknown filter type {filter_type}')
+
+        return self._filter_by_indices(self, indices)
         
     @staticmethod
     def _filter_by_indices(instance, indices):
