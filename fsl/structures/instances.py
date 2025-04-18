@@ -35,6 +35,7 @@ class Instances(object):
     labels: List[str] = field(default_factory=lambda: [])
     class_ids: List[int] = field(default_factory=lambda: [])
     scores: List[float] = field(default_factory=lambda: [])
+    sub_categories: List[str] = field(default_factory=lambda: [])    
     bbox_fmt: Union[BoundingBoxFormat, str] = BoundingBoxFormat.XYWH
     image_id: str = ""
 
@@ -202,6 +203,8 @@ class Instances(object):
             instance.class_ids = instance.class_ids[indices]
         if len(instance.scores):
             instance.scores = instance.scores[indices]
+        if len(instance.sub_categories):
+            instance.sub_categories = [instance.sub_categories[int(i)] for i in indices]
         return instance
     
     def __len__(self) -> int:
