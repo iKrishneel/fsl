@@ -264,7 +264,7 @@ class RandomResizeCrop(transforms.RandomResizedCrop):
             diff = nbboxes[:, 2:] - nbboxes[:, :2]
             flags = torch.prod(diff > self.min_size, dim=1).bool()
             data['bboxes'] = nbboxes[flags]
-            data['category_ids'] = data['category_ids'][flags]
+            data['category_ids'] = [cid for i, cid in enumerate(data['category_ids']) if flags[i]]
             data['category_names'] = [name for i, name in enumerate(data['category_names']) if flags[i]]
 
         if 'masks' in data:

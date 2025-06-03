@@ -20,7 +20,7 @@ torchvision.disable_beta_transforms_warning()
 from igniter.datasets import S3CocoDataset, S3Dataset
 from igniter.logger import logger
 from igniter.registry import dataset_registry, func_registry
-from pycocotools.mask import decode
+from pycocotools.mask import decode, frPyObjects
 
 from fsl.utils import version
 
@@ -300,11 +300,18 @@ class S3CocoDatasetFS(S3CocoDataset):
 
     def __getitem__(self, index: int) -> Dict[str, Any]:
         image, targets = super().__getitem__(index)
+        return self.prep_data(image, targets)
+
+    def prep_data(self, image, targets):
+        
+        # targets = self.get_mask_image(image.size[::-1], targets)
+
         bboxes = [torch.FloatTensor(target['bbox']) for target in targets]
         category_ids = [target['category_id'] for target in targets]
         category_names = [target['category_name'] for target in targets]
         image_ids = [target['image_id'] for target in targets]
-
+        # masks = [target['segmentation'] for target in targets]
+        
         assert len(bboxes) > 0, 'Empty bounding boxes'
 
         image = functional.pil_to_tensor(image)
@@ -321,6 +328,14 @@ class S3CocoDatasetFS(S3CocoDataset):
             data = self.transforms(data)
 
         return data
+
+    def get_mask_image(self, im_hw: List[int], targets: List[Dict[str, Any]]):
+        for target in targets:
+            if 'segmentation' not in target:
+                continue
+            rle = frPyObjects(target['segmentation'], *im_hw)
+            target['segmentation'] = decode(rle).squeeze()
+        return targets
 
 
 def load_coco(json_file: str):
@@ -351,8 +366,14 @@ def collate_data_instances(batches: List[Dict[str, Any]]) -> List[Any]:
     for batch in batches:
         image = batch.pop('image')
         images.append(image)
+        bboxes = batch['bboxes']
+
+        if len(bboxes) == 0:
+            breakpoint()
+        
         instances = Instances(
-            bboxes=batch['bboxes'],
+            # bboxes=batch['bboxes'],
+            bboxes=torch.stack(bboxes) if isinstance(bboxes, (tuple, list)) and len(bboxes) else bboxes,
             class_ids=batch['category_ids'],
             labels=batch['category_names' if 'category_names' in batch else 'category_ids'],
             bbox_fmt=BoundingBoxFormat.XYXY,
