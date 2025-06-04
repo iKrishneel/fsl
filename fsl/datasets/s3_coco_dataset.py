@@ -368,9 +368,6 @@ def collate_data_instances(batches: List[Dict[str, Any]]) -> List[Any]:
         images.append(image)
         bboxes = batch['bboxes']
 
-        if len(bboxes) == 0:
-            breakpoint()
-        
         instances = Instances(
             # bboxes=batch['bboxes'],
             bboxes=torch.stack(bboxes) if isinstance(bboxes, (tuple, list)) and len(bboxes) else bboxes,
