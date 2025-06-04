@@ -206,6 +206,7 @@ class S3CocoDatasetFS(S3CocoDataset):
         json_file: str,
         label_map_file: str,
         filename_signature: str = 'full_box_%sshot_%s_trainval.json',
+        split_dir: str = None,
         **kwargs,
     ) -> None:
         json_filename = os.path.splitext(os.path.basename(json_file))[0]
@@ -217,7 +218,7 @@ class S3CocoDatasetFS(S3CocoDataset):
             shot = kwargs.get('shot', None)
             assert shot
 
-        split_dir = os.path.join(os.path.dirname(json_file), 'cocosplit2017/seed1')
+        split_dir = split_dir or os.path.join(os.path.dirname(json_file), 'cocosplit2017/seed1')
         assert os.path.isdir(split_dir), f'Directory not found {split_dir}'
         anno_dict = load_json(json_file)
 
