@@ -183,7 +183,9 @@ class Instances(object):
         elif filter_type == 'intersect':
             x1, y1, x2, y2 = crop_box
             condition = (self.bboxes[:, 0] >= x1) & (self.bboxes[:, 1] >= y1) & (self.bboxes[:, 2] <= x2) & (self.bboxes[:, 3] <= y2)
-            indices = torch.nonzero(condition).squeeze()
+
+            # indices = torch.nonzero(condition).squeeze()
+            indices = torch.nonzero(condition, as_tuple=True)[0]
         else:
             raise TypeError(f'Unknown filter type {filter_type}')
 
