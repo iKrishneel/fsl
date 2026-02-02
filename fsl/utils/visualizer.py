@@ -4,6 +4,8 @@ import colorsys
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
+import math
+
 import cv2 as cv
 import matplotlib as mpl
 import matplotlib.colors as mplc
@@ -105,7 +107,8 @@ class Visualizer(object):
         )
 
     def __call__(self, instances: 'Instances', alpha: Optional[float] = 0.5, **kwargs: Dict[str, Any]) -> np.ndarray:
-        return self.overlay(instances, alpha=alpha)
+        # return self.overlay(instances, alpha=alpha)
+        return self.overlay_with_side_panel(instances, alpha=alpha)
 
     def overlay(self, instances: 'Instances', colors: List[List[int]] = None, alpha: Optional[float] = 0.5):
         if len(instances) == 0:
@@ -155,6 +158,60 @@ class Visualizer(object):
                 )
 
         return self.output
+
+    def overlay_with_side_panel(
+        self, instances: 'Instances', colors: List[List[int]] = None, alpha: float = 0.5, thresh: float = 0.5
+    ):
+        vis = self.overlay(instances, colors=colors, alpha=alpha)
+        overlay_img = vis.get_image()
+
+        crops = []
+        instances = instances.convert_bbox_fmt('xywh').numpy().sort_by_area()
+
+        sorted_indices = instances.scores.sort().indices.flip(0)
+        for i in sorted_indices:
+            mask = instances.masks[i].astype(np.uint8) if instances.masks is not None else None
+
+            crop = crop_instance(self.image, instances.bboxes[i], mask=mask)
+            text = f'{instances.labels[i]}: {instances.scores[i]:.2f}'
+
+            color = (255, 255, 255) if instances.scores[i] > thresh else (255, 0, 0)
+            crop = self._draw_crop_text(crop, text=text, color=color)
+            crops.append(crop)
+
+        grid = render_crop_grid(crops, im_hw=overlay_img.shape[:2], crop_size=128)
+        
+        if grid is None:
+            return vis
+
+        im_viz = np.zeros(
+            (max(self.image.shape[0], grid.shape[0]), self.image.shape[1] + grid.shape[1], 3), dtype=self.image.dtype
+        )
+
+        im_viz[:grid.shape[0], :grid.shape[1]] = grid
+        im_viz[:, grid.shape[1]:] = overlay_img
+
+        self.output = VisImage(im_viz, scale=self.scale)
+        return self.output
+
+    def _draw_crop_text(self, crop: np.ndarray, text: str, color: Tuple[float, ...] = None):
+        if crop.size == 0:
+            return crop
+
+        bgr = color or (255, 255, 255)
+
+        font = cv.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.4
+        thickness = 1
+
+        name, conf = text.split(':')
+        text = (name[:10] + '..' if len(name) > 10 else name) + conf
+
+        (tw, th), _ = cv.getTextSize(text, font, font_scale, thickness)
+
+        cv.rectangle(crop, (2, 2), (tw + 6, th + 10), (0, 0, 0), -1)
+        cv.putText(crop, text, (2, th + 7), font, font_scale, bgr, thickness, cv.LINE_AA)
+        return crop
 
     def draw_box(
         self, box_coord: np.ndarray, alpha: float = 0.5, edge_color: str = 'g', line_style: str = '-'
@@ -267,6 +324,49 @@ class Visualizer(object):
         modified_lightness = 1.0 if modified_lightness > 1.0 else modified_lightness
         modified_color = colorsys.hls_to_rgb(polygon_color[0], modified_lightness, polygon_color[2])
         return tuple(np.clip(modified_color, 0.0, 1.0))
+
+
+def crop_instance(image: np.ndarray, bbox: np.ndarray, mask: Optional[np.ndarray] = None, out_size: int = 128, pad: int = 5):
+    x, y, w, h = bbox.astype(int)
+    x2, y2 = x + w, y + h
+
+    x = max(0, x - pad)
+    y = max(0, y - pad)
+    x2 = min(image.shape[1], x2 + pad)
+    y2 = min(image.shape[0], y2 + pad)
+
+    crop = image[y:y2, x:x2].copy()
+
+    if crop.size == 0:
+        return np.zeros((out_size, out_size, 3), dtype=np.uint8)
+
+    if mask is not None:
+        mask_crop = mask[y:y2, x:x2]
+        crop[mask_crop == 0] = 255
+
+    return cv.resize(crop, (out_size, out_size))
+
+
+def render_crop_grid(crops: List[np.ndarray], im_hw: List[int], crop_size: int = 128) -> np.ndarray:
+    assert crop_size > 0
+    if not crops:
+        return None
+
+    rows = max(1, im_hw[0] // crop_size)
+    cols = math.ceil(len(crops) / rows)
+
+    grid = np.zeros((rows * crop_size, cols * crop_size, 3), dtype=np.uint8)
+    for idx, crop in enumerate(crops):
+        r = idx % rows
+        c = idx // rows
+
+        y1 = r * crop_size
+        y2 = y1 + crop_size
+        x1 = c * crop_size
+        x2 = x1 + crop_size
+
+        grid[y1:y2, x1:x2] = crop
+    return grid
 
 
 if __name__ == '__main__':
