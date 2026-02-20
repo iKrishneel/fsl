@@ -253,6 +253,8 @@ def build_mask_generator(rpn_args: DictConfig) -> nn.Module:
         build_func = importlib.import_module('fsl.models.sam_utils').build_sam_auto_mask_generator
     elif rpn_type == 'fast_sam':
         build_func = importlib.import_module('fsl.models.fast_sam_utils').build_fast_sam_mask_generator
+    elif rpn_type == 'sam2':
+        build_func = importlib.import_module('fsl.models.sam2_utils').build_sam2_auto_mask_generator
     else:
         raise TypeError(f'Unknown type {rpn_type}')
 
