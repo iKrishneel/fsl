@@ -41,5 +41,9 @@ setup(
         'dev': [
             'jupyterlab',
         ],
+        'sam2': [
+            'sam2 @ git+https://github.com/facebookresearch/sam2.git',            
+            'vision-rt-engine',
+        ]
     },
 )
